@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+contribcheck-out/
+.contribcheck/
+examples/demo/repos/
+examples/demo/contribcheck-out/
+examples/demo/.contribcheck/
+*.tgz
+.DS_Store
+Thumbs.db

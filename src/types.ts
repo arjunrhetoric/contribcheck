@@ -6,6 +6,9 @@ export interface Share {
   share: number;
   role: Role;
   method: string;
+  /** Optional per-metric weights (squash containers can differ). Defaults to `share`. */
+  commitShare?: number;
+  churnShare?: number;
 }
 
 export interface TeamConfig {

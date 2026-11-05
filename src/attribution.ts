@@ -105,33 +105,20 @@ export function attribute(input: AttributeInput): Share[] {
     const dist = input.squashDistribution;
     const totalCommits = dist.reduce((a, d) => a + d.commits, 0);
     const totalChurn = dist.reduce((a, d) => a + d.churn, 0);
-    const shares: Share[] = [];
-    if (totalChurn > 0) {
-      for (const d of dist) {
-        shares.push({
-          memberId: d.memberId,
-          share: d.churn / totalChurn,
-          role: d.memberId ? "pr-author" : "unattributed",
-          method: "squash-github",
-        });
-      }
-    } else if (totalCommits > 0) {
-      for (const d of dist) {
-        shares.push({
-          memberId: d.memberId,
-          share: d.commits / totalCommits,
-          role: d.memberId ? "pr-author" : "unattributed",
-          method: "squash-github",
-        });
-      }
-    } else {
-      const n = dist.length;
-      for (const d of dist) {
-        shares.push({ memberId: d.memberId, share: 1 / n, role: d.memberId ? "pr-author" : "unattributed", method: "squash-github" });
-      }
-    }
-    // merge same memberId
-    return mergeShares(shares);
+    const n = dist.length;
+    const shares: Share[] = dist.map((d) => {
+      const commitShare = totalCommits > 0 ? d.commits / totalCommits : 1 / n;
+      const churnShare = totalChurn > 0 ? d.churn / totalChurn : commitShare;
+      return {
+        memberId: d.memberId,
+        share: churnShare,
+        commitShare,
+        churnShare,
+        role: d.memberId ? "pr-author" : "unattributed",
+        method: "squash-github",
+      };
+    });
+    return shares;
   }
   if (input.isSquashContainer) {
     const r = resolveIdentity(input.primaryName, input.primaryEmail, input.roster, input.primaryLogin);
@@ -162,18 +149,4 @@ export function attribute(input: AttributeInput): Share[] {
     role: (u.memberId ? (u.memberId === primary.memberId ? "primary" : "co-author") : "unattributed") as Share["role"],
     method: u.memberId ? (u.memberId === primary.memberId ? primary.method : "coauthor-equal") : "coauthor-equal",
   }));
-}
-
-function mergeShares(shares: Share[]): Share[] {
-  const m = new Map<string, Share>();
-  for (const s of shares) {
-    const k = `${s.memberId ?? "__null__"}|${s.role}|${s.method}`;
-    const e = m.get(k);
-    if (e) e.share += s.share;
-    else m.set(k, { ...s });
-  }
-  const out = [...m.values()];
-  const total = out.reduce((a, s) => a + s.share, 0);
-  if (total > 0) for (const s of out) s.share /= total;
-  return out;
 }

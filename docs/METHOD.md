@@ -59,13 +59,14 @@ A subject ending in `(#<number>)` is a squash candidate.
 - `c_i` = number of PR commits by author `i`;
 - `w_i` = that author’s `additions + deletions` from `GET /commits/{sha}`.
 
-The container’s shares are:
+The container gets two weights per author:
 
 ```
-share_i = w_i / Σ w        (if Σ w > 0)
-share_i = c_i / Σ c        (else if Σ c > 0)
-share_i = 1 / n            (else)
+commitShare_i = c_i / Σ c                  (or 1/n when Σ c = 0)
+churnShare_i  = w_i / Σ w                  (or commitShare_i when Σ w = 0)
 ```
+
+Commit counts use `commitShare`; churn uses `churnShare`; surviving lines use `churnShare`. Both vectors sum to 1. For all non-squash commits the two weights equal the ordinary share.
 
 This is an **approximation**: squash merges destroy per-commit history, GitHub’s stats may be unavailable for large commits, and the 250-commit listing limit can hide commits. The report labels the method `squash-github` and the limitation is repeated in `docs/LIMITATIONS.md`.
 

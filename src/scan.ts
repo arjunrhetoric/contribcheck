@@ -845,15 +845,15 @@ async function scanTeam(
       continue;
     }
     for (const s of c.shares) {
-      const wCommits = s.share * 1;
-      const wAdd = s.share * c.churnAdded;
-      const wDel = s.share * c.churnDeleted;
+      const wCommits = (s.commitShare ?? s.share) * 1;
+      const wAdd = (s.churnShare ?? s.share) * c.churnAdded;
+      const wDel = (s.churnShare ?? s.share) * c.churnDeleted;
       if (s.memberId && acc.has(s.memberId)) {
         const a = acc.get(s.memberId)!;
         a.commits += wCommits;
         a.added += wAdd;
         a.deleted += wDel;
-        a.formatting += s.share * c.formattingLines;
+        a.formatting += (s.churnShare ?? s.share) * c.formattingLines;
         a.totalCreditedCommits += wCommits;
         if (c.onRef) a.onRefCommits += wCommits; else a.offRefCommits += wCommits;
         if (authorDate) {
@@ -868,7 +868,7 @@ async function scanTeam(
         for (const f of c.files) {
           a.files.add(f.path);
           const area = areaFor(f.path, config.areas);
-          if (area) a.areas.set(area, (a.areas.get(area) ?? 0) + s.share * (f.added + f.deleted));
+          if (area) a.areas.set(area, (a.areas.get(area) ?? 0) + (s.churnShare ?? s.share) * (f.added + f.deleted));
         }
         // final window: 48h before deadline
         if (authorDate && deadlineDate && authorDate.getTime() <= deadlineDate.getTime() + graceMs && authorDate.getTime() > deadlineDate.getTime() + graceMs - 48 * 3600 * 1000) {

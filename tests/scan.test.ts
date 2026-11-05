@@ -290,10 +290,12 @@ describe("squash with mocked github distributes churn", () => {
       const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true, github: true });
       const t = analysis.teams[0]!;
       expect(t.flags.some((f) => f.code === "SQUASH_UNRESOLVED")).toBe(false);
-      const alice = t.members.find((m) => m.memberId === "alice")!;
-      const bob = t.members.find((m) => m.memberId === "bob")!;
-      expect(alice.commits).toBeCloseTo(0.9, 6);
-      expect(bob.commits).toBeCloseTo(0.1, 6);
+    const alice = t.members.find((m) => m.memberId === "alice")!;
+    const bob = t.members.find((m) => m.memberId === "bob")!;
+    expect(alice.commits).toBeCloseTo(0.5, 6);
+    expect(bob.commits).toBeCloseTo(0.5, 6);
+    expect(alice.churnTotal).toBeCloseTo(0.9, 6);
+    expect(bob.churnTotal).toBeCloseTo(0.1, 6);
     } finally {
       globalThis.fetch = realFetch;
       delete process.env["GITHUB_TOKEN"];

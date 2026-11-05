@@ -1,0 +1,4 @@
+team,member_id,name,emails,github
+team-alpha,alice,Alice,alice@example.com,alice-gh
+team-alpha,bob,Bob,bob@example.com,bob-gh
+team-alpha,carol,Carol,carol@example.com,carol-gh

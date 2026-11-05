@@ -1,0 +1,27 @@
+# Demo config for contribcheck. Repos are relative to this file.
+timezone: Asia/Kolkata
+courseStart: "2026-08-01"
+includeUnmerged: true
+excludePaths: []
+excludeCommits: []
+bots: []
+coAuthorCredit: equal
+composite:
+  enabled: true
+  weights: { commits: 0.2, churn: 0.3, survivingLines: 0.5 }
+thresholds:
+  lowShare: 0.5
+  largeCommitLines: 200
+  largeCommitFiles: 40
+areas:
+  frontend: "apps/web/**"
+  backend: "src/**"
+github:
+  enabled: false
+teams:
+  team-alpha:
+    deadline: "2026-11-15T23:59:00+05:30"
+    graceMinutes: 0
+    ref: main
+    repos:
+      - repos/team-alpha

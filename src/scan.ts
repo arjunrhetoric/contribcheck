@@ -408,7 +408,7 @@ async function scanTeam(
   const evidence: Record<string, string[]> = {};
   const addEvidence = (k: string, v: string) => {
     if (!evidence[k]) evidence[k] = [];
-    if (evidence[k]!.length < 1000 && !evidence[k]!.includes(v)) evidence[k]!.push(v);
+    if (!evidence[k]!.includes(v)) evidence[k]!.push(v);
   };
 
   const repos = [];
@@ -421,6 +421,7 @@ async function scanTeam(
   const graceMs = (t.graceMinutes ?? 0) * 60 * 1000;
   const deadlineWithGrace = deadlineDate ? new Date(deadlineDate.getTime() + graceMs) : null;
   const courseStartDate = config.courseStart ? parseDateFlexible(config.courseStart) : null;
+  const courseStartDateOnly = !!config.courseStart && /^\d{4}-\d{2}-\d{2}$/.test(config.courseStart);
   const scanNow = new Date();
 
   for (let repoIdx = 0; repoIdx < t.repos.length; repoIdx++) {
@@ -498,6 +499,7 @@ async function scanTeam(
   const apiLoginBySha = new Map<string, string>();
   const prBySquashSha = new Map<string, number>();
   const prCommitsCache = new Map<number, { sha: string; authorLogin: string | null; authorEmail: string; authorName: string; stats?: { additions: number; deletions: number } }[]>();
+  const prAuthorByNumber = new Map<number, string>();
   let prLimitReached = false;
   const prMetricsByMember = new Map<string, { authored: number; merged: number; reviewsApproved: number; reviewsChangesRequested: number; reviewsCommented: number; inlineComments: number; issueComments: number; selfApproved: number }>();
   const prCollected = o.gh !== null;
@@ -664,6 +666,7 @@ async function scanTeam(
             const em = pc.commit?.author?.email ?? "";
             const nm = pc.commit?.author?.name ?? "";
             const lg = pc.author?.login ?? null;
+            if (lg && !prAuthorByNumber.has(prNum)) prAuthorByNumber.set(prNum, lg);
             const rr = resolveIdentity(nm, em, teamRoster, lg);
             let churn = 0;
             try {
@@ -727,7 +730,7 @@ async function scanTeam(
     let dateAnomaly: string | null = null;
     if (authorDate) {
       if (authorDate.getTime() > scanNow.getTime() + 5 * 60 * 1000) dateAnomaly = "future";
-      else if (courseStartDate && authorDate.getTime() < courseStartDate.getTime()) dateAnomaly = "before-course-start";
+      else if (courseStartDate && (courseStartDateOnly ? dayKeyInTz(authorDate, config.timezone) < config.courseStart! : authorDate.getTime() < courseStartDate.getTime())) dateAnomaly = "before-course-start";
     }
 
     const largeFlag = !exclusionReason && ((added + deleted) > config.thresholds.largeCommitLines || nFiles > config.thresholds.largeCommitFiles);
@@ -753,7 +756,7 @@ async function scanTeam(
       });
     }
 
-    addEvidence("subjects", stripControl(raw.subject).slice(0, 120));
+    addEvidence("subjects", stripControl(raw.subject));
     attributed.push({
       ...raw, onRef, repoPath, patchId: pid, isMerge, isEmpty: rows.length === 0 && !isMerge,
       exclusionReason, shares, churnAdded: added, churnDeleted: deleted, churnFiles: nFiles,
@@ -788,7 +791,7 @@ async function scanTeam(
         for (const n of prNums) {
           try {
             const pr = await o.gh.getJson<{ user: { login: string } | null; merged_at: string | null }>(`${base}/pulls/${n}`);
-            const authorLogin = pr.data?.user?.login ?? null;
+            const authorLogin = pr.data?.user?.login ?? prAuthorByNumber.get(n) ?? null;
             if (authorLogin) {
               bumpLogin(authorLogin, "authored");
               if (pr.data?.merged_at) bumpLogin(authorLogin, "merged");
@@ -844,12 +847,26 @@ async function scanTeam(
     const authorDate = parseDateFlexible(c.authorDate);
     const week = authorDate ? isoWeekInTz(authorDate, config.timezone) : "unknown";
     const day = authorDate ? dayKeyInTz(authorDate, config.timezone) : "unknown";
-    const isPair = c.coAuthors.length > 0;
     if (c.exclusionReason) {
       excluded.commits += 1;
       // excluded churn not counted (already filtered); surviving handled in blame
-      addEvidence("excluded", `${c.sha.slice(0, 7)} ${c.exclusionReason} ${stripControl(c.subject).slice(0, 80)}`);
+      addEvidence("excluded", `${c.sha.slice(0, 7)} ${c.exclusionReason} ${stripControl(c.subject)}`);
       continue;
+    }
+    // Pair activity is independent of the credit setting: every resolved
+    // participant gets one pair commit, even with coAuthorCredit: none.
+    if (c.coAuthors.length > 0) {
+      const pairMembers = new Set<string>();
+      const pr = resolveIdentity(c.authorName, c.authorEmail, teamRoster, null);
+      if (pr.memberId) pairMembers.add(pr.memberId);
+      for (const co of c.coAuthors) {
+        const rr = resolveIdentity(co.name, co.email, teamRoster, null);
+        if (rr.memberId) pairMembers.add(rr.memberId);
+      }
+      for (const id of pairMembers) {
+        const a = acc.get(id);
+        if (a) a.pair += 1;
+      }
     }
     for (const s of c.shares) {
       const wCommits = (s.commitShare ?? s.share) * 1;
@@ -868,10 +885,6 @@ async function scanTeam(
           a.days.add(day);
         }
         if (c.postDeadline) a.postDeadline += wCommits;
-        if (isPair && config.coAuthorCredit !== null) {
-          // pairCommits counts co-authored commits regardless of credit setting
-          a.pair += 1;
-        }
         for (const f of c.files) {
           a.files.add(f.path);
           const area = areaFor(f.path, config.areas);
@@ -956,7 +969,7 @@ async function scanTeam(
   }
   for (const [mid, v] of survivingByMember) acc.get(mid)!.surviving = v;
   for (const [mid, files] of survivingFilesByMember) {
-    for (const [f, count] of [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 25)) {
+    for (const [f, count] of [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       addEvidence(`surviving:${mid}`, `${f}: ${Math.round(count)} line(s)`);
     }
   }

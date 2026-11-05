@@ -35,7 +35,12 @@ export function gitExec(repoPath: string, args: string[], input?: string): Promi
 }
 
 export async function checkGitVersion(): Promise<void> {
-  const { stdout } = await gitExec(process.cwd(), ["--version"]);
+  let stdout: string;
+  try {
+    ({ stdout } = await gitExec(process.cwd(), ["--version"]));
+  } catch {
+    throw new Error("Git 2.23 or newer is required and must be on PATH (could not run `git --version`).");
+  }
   const m = stdout.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
   if (!m) throw new Error("Unable to determine git version. Git 2.23 or newer is required.");
   const major = Number(m[1]);

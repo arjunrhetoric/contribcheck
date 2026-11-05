@@ -214,14 +214,14 @@ Co-authored-by: Bob <bob@example.com>
 
 Alice is the primary. Both resolve. With `coAuthorCredit: equal`, n = 2, so each gets 0.5 commits, 45 added, 5 deleted. `pairCommits` for both increases by 0.5. If Bob were unresolved, Alice would get 0.5 and `unattributed` would get 0.5 commits and half the churn.
 
-Now a squash container `def5678` with subject `Add reports (#42)`, 100 added lines. Without enrichment: Alice (the listed author) gets 1 commit and 100 churn, and `SQUASH_UNRESOLVED` is raised. With enrichment, suppose PR #42 has two commits: Alice 80 churn, Bob 20 churn. Then:
+Now a squash container `def5678` with subject `Add reports (#42)`, 100 added lines. Without enrichment: Alice (the listed author) gets 1 commit and 100 churn, and `SQUASH_UNRESOLVED` is raised. With enrichment, suppose PR #42 has three commits: Alice wrote two (80 churn total), Bob wrote one (20 churn). Then:
 
 ```
-share_Alice = 80 / 100 = 0.8
-share_Bob   = 20 / 100 = 0.2
+commitShare_Alice = 2 / 3 = 0.667      churnShare_Alice = 80 / 100 = 0.8
+commitShare_Bob   = 1 / 3 = 0.333      churnShare_Bob   = 20 / 100 = 0.2
 ```
 
-Alice gets 0.8 commits / 80 churn, Bob 0.2 commits / 20 churn.
+Alice gets 0.667 commits and 80 churn; Bob gets 0.333 commits and 20 churn. If both churn weights were zero, churn would split 0.5/0.5 instead.
 
 Finally, suppose Alice has 30 meaningful churn and 12 surviving lines in a team where member totals are 120 churn and 48 surviving:
 

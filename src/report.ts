@@ -61,7 +61,7 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
   const out: Record<string, string> = {};
   for (const t of a.teams) {
     const L: string[] = [];
-    L.push("> Evidence for human review. This is not a grade.");
+    L.push("Evidence for human review. This is not a grade.");
     L.push("");
     L.push(`# contribcheck — team ${escapeMdCell(stripControl(t.teamId))}`);
     L.push("");
@@ -94,7 +94,10 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
       }
       L.push("");
     }
-    L.push(`Unattributed: commits=${fmtNum(t.unattributed.commits)} churn=${fmtNum(t.unattributed.churnTotal)} surviving=${fmtNum(t.unattributed.survivingLines)}. Excluded: commits=${t.excluded.commits} surviving=${t.excluded.survivingLines}.`);
+    const unPct = (v: number, total: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "n/a");
+    L.push(`Unattributed: commits=${fmtNum(t.unattributed.commits)} (${unPct(t.unattributed.commits, t.totals.commits)} of team commits), churn=${fmtNum(t.unattributed.churnTotal)} (${unPct(t.unattributed.churnTotal, t.totals.churnTotal)} of churn), surviving=${fmtNum(t.unattributed.survivingLines)} (${unPct(t.unattributed.survivingLines, t.totals.survivingLines)} of surviving). Excluded: commits=${t.excluded.commits} surviving=${t.excluded.survivingLines}.`);
+    L.push("");
+    L.push(`PR data: ${t.prCollected ? "collected" : "not collected"}.`);
     L.push("");
     L.push("## Flags");
     L.push("");
@@ -162,8 +165,10 @@ export function renderHtml(analysis: Analysis, opts?: { redact?: boolean; config
     const evItems = Object.entries(t.evidence).slice(0, 10).map(([k, v]) => `<li>${escapeHtml(stripControl(k))}: ${v.slice(0, 5).map((e) => escapeHtml(stripControl(e))).join(", ")}</li>`).join("");
     const subjects = (t.evidence["subjects"] ?? []).slice(0, 10).map((s) => `<li>${escapeHtml(stripControl(s))}</li>`).join("");
     const comps = t.members.filter((m) => m.composite).map((m) => `<li>${escapeHtml(stripControl(m.memberId))}: ${m.composite!.value} — ${escapeHtml(m.composite!.formula)}; components ${escapeHtml(JSON.stringify(m.composite!.components))}</li>`).join("");
+    const pct = (v: number, total: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "n/a");
+    const unattSummary = `Unattributed: ${t.unattributed.commits} commits (${pct(t.unattributed.commits, t.totals.commits)}), ${t.unattributed.churnTotal} churn (${pct(t.unattributed.churnTotal, t.totals.churnTotal)}), ${t.unattributed.survivingLines} surviving (${pct(t.unattributed.survivingLines, t.totals.survivingLines)}).`;
     const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(stripControl(x.memberId))}: ${escapeHtml(stripControl(redact ? redactText(x.note, r) : x.note))}</li>`).join("");
-    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>formatting (est.)</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
+    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>formatting (est.)</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table><p>${unattSummary}</p>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
   }
   return out;
 }
@@ -172,11 +177,11 @@ export function renderCsv(analysis: Analysis, opts?: { redact?: boolean }): stri
   const redact = opts?.redact ?? false;
   const r = newRedactor();
   const a = redact ? redactAnalysis(analysis, r) : analysis;
-  const header = ["team", "member_id", "name", "commits", "churn_added", "churn_deleted", "churn_total", "surviving_lines", "formatting_lines", "files_touched", "active_days", "post_deadline", "pair_commits", "commit_share", "churn_share", "surviving_share", "composite_value"];
+  const header = ["team", "member_id", "name", "commits", "churn_added", "churn_deleted", "churn_total", "surviving_lines", "formatting_lines", "files_touched", "active_days", "post_deadline", "pair_commits", "commit_share", "churn_share", "surviving_share", "composite_value", "composite_formula", "composite_components"];
   const lines = [header.join(",")];
   for (const t of a.teams) {
     for (const m of t.members) {
-      const row = [stripControl(t.teamId), stripControl(m.memberId), stripControl(m.name), m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? "", m.composite?.value ?? ""];
+      const row = [stripControl(t.teamId), stripControl(m.memberId), stripControl(m.name), m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? "", m.composite?.value ?? "", m.composite?.formula ?? "", m.composite ? JSON.stringify(m.composite.components) : ""];
       lines.push(row.map((v) => csvCell(String(v))).join(","));
     }
   }
@@ -207,7 +212,7 @@ export function renderExplain(analysis: Analysis, memberId: string, view: "instr
     return JSON.stringify({ member: m, team, evidence: ownEvidence }, null, 2);
   }
   const L: string[] = [];
-  L.push("> Evidence for human review. This is not a grade.");
+  L.push("Evidence for human review. This is not a grade.");
   L.push("");
   L.push(`# explain ${escapeMdCell(memberId)} (${view} view)`);
   L.push("");

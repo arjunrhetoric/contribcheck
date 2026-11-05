@@ -4,6 +4,7 @@
   "description": "Explainable, auditable contribution breakdown from local git repositories",
   "license": "MIT",
   "type": "module",
+  "main": "./dist/index.js",
   "engines": {
     "node": ">=22"
   },

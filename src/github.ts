@@ -38,7 +38,7 @@ export class GitHubClient {
   maxConcurrent = 4;
 
   constructor(opts?: { dir?: string; fetchFn?: typeof fetch }) {
-    this.token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? null;
+    this.token = process.env["GITHUB_TOKEN"] || process.env["GH_TOKEN"] || null;
     this.dir = opts?.dir ?? cacheDir();
     this.fetchFn = opts?.fetchFn ?? fetch;
   }
@@ -91,10 +91,18 @@ export class GitHubClient {
       const reset = res.headers.get("x-ratelimit-reset");
       const remaining = res.headers.get("x-ratelimit-remaining");
       const rateLimited = res.status === 429 || remaining === "0" || !!retryAfter || !!reset;
+      if (remaining === "0" && !retryAfter) {
+        const resetMs = reset ? Number(reset) * 1000 - Date.now() : 0;
+        if (!reset || resetMs > 60_000) {
+          throw new Error(this.sanitizeError("GitHub rate limit exhausted. Re-run later; the cache makes re-runs cheap."));
+        }
+      }
       if (rateLimited && attempt < 5) {
         let waitMs = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
-        if (retryAfter) waitMs = Number(retryAfter) * 1000;
-        else if (reset) {
+        if (retryAfter) {
+          const secs = Number(retryAfter);
+          waitMs = isFinite(secs) ? secs * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now());
+        } else if (reset) {
           const resetMs = Number(reset) * 1000 - Date.now();
           if (resetMs > 0 && resetMs < 10 * 60 * 1000) waitMs = resetMs + 1000;
         }

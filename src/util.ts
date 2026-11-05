@@ -1,9 +1,11 @@
 export function stripControl(s: string): string {
-  // Strip ANSI escapes and other control chars except \n \t
+  // Strip ANSI escapes (CSI and OSC) and other control chars except \n \t
   // eslint-disable-next-line no-control-regex
   const ansi = /\x1B\[[0-9;?]*[A-Za-z]/g;
-  let out = s.replace(ansi, "");
-  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // eslint-disable-next-line no-control-regex
+  const osc = /\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g;
+  let out = s.replace(ansi, "").replace(osc, "");
+  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]/g, "");
   return out;
 }
 
@@ -21,7 +23,7 @@ export function escapeHtml(s: string): string {
 }
 
 export function escapeMdCell(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/`/g, "\\`").replace(/</g, "\\<").replace(/>/g, "\\>");
+  return s.replace(/\r?\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/`/g, "\\`").replace(/</g, "\\<").replace(/>/g, "\\>");
 }
 
 export function csvCell(v: string | number | null | undefined): string {

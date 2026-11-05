@@ -36,6 +36,23 @@ describe("co-author split + totals reconcile", () => {
     const sumSurv = t.members.reduce((a, m) => a + m.survivingLines, 0) + t.unattributed.survivingLines + t.excluded.survivingLines;
     expect(sumSurv).toBe(t.totals.survivingLines);
   });
+
+  it("pair commits stay counted with coAuthorCredit: none", async () => {
+    const repo = initRepo(path.join(tmp, "repo2"));
+    commitFile(repo, "a.txt", "x\n", {
+      name: "Alice", email: "alice@example.com", date: D1, message: "pair",
+      body: "Co-authored-by: Bob <bob@example.com>",
+    });
+    const extra = { coAuthorCredit: "none", teams: { "team-alpha": { deadline: "2026-11-15T23:59:00+05:30", graceMinutes: 0, ref: "main", repos: [repo] } } };
+    const dir2 = path.join(tmp, "cfg-none");
+    fs.mkdirSync(dir2, { recursive: true });
+    const { configPath, rosterPath, outDir } = writeConfig(dir2, [repo], extra);
+    const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true });
+    const t = analysis.teams[0]!;
+    expect(t.members.find((m) => m.memberId === "alice")!.pairCommits).toBe(1);
+    expect(t.members.find((m) => m.memberId === "bob")!.pairCommits).toBe(1);
+    expect(t.members.find((m) => m.memberId === "bob")!.commits).toBe(0);
+  });
 });
 
 describe("squash without github", () => {
@@ -125,6 +142,18 @@ describe("identity: mailmap, aliases, noreply, unresolved", () => {
 });
 
 describe("deadlines and timezones", () => {
+  it("treats courseStart as a calendar date in the configured timezone", async () => {
+    const repo = initRepo(path.join(tmp, "repo-dates"));
+    const before = commitFile(repo, "before.txt", "x\n", { name: "Alice", email: "alice@example.com", date: "2026-07-31T10:00:00+05:30", message: "before" });
+    const onStart = commitFile(repo, "start.txt", "y\n", { name: "Alice", email: "alice@example.com", date: "2026-08-01T00:30:00+05:30", message: "on start" });
+    const { configPath, rosterPath, outDir } = writeConfig(tmp, [repo]);
+    const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true });
+    const anomalies = analysis.teams[0]!.flags.filter((f) => f.code === "DATE_ANOMALY");
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0]!.evidence[0]).toBe(before);
+    expect(anomalies[0]!.evidence[0]).not.toBe(onStart);
+  });
+
   it("flags post-deadline with grace and offset handling", async () => {
     const repo = initRepo(path.join(tmp, "repo"));
     // deadline 2026-11-15T23:59:00+05:30. Commit at 2026-11-16T00:30:00+05:30 is late; with 60min grace, 00:30 is within grace.

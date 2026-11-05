@@ -16,6 +16,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Markdown, HTML (self-contained, escaped, inline SVG), CSV (formula-injection guarded), and JSON reports.
 - `--redact`, student view, instructor notes, deterministic output with `--no-timestamp`.
 - Demo generator (`scripts/make-demo-repo.mjs`), docs, and CI for Node 22/24 on Ubuntu and Windows.
-- 41 Vitest tests covering attribution, exclusions, identity, deadlines, shallow clones, blame, duplicates, security, determinism, GitHub client behavior, and paths with spaces.
+- 43 Vitest tests covering attribution, exclusions, identity, deadlines, shallow clones, blame, duplicates, security, determinism, GitHub client behavior, and paths with spaces.
 
 [0.1.0]: https://github.com/example/contribcheck/releases/tag/v0.1.0

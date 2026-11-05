@@ -60,11 +60,11 @@ team team-alpha: 3 members, 17 commits, 604 churn, 604 surviving
 
 Sample member table from `team-alpha.md`:
 
-| member | commits | churn | surviving | commit share | churn share | surviving share | post-deadline | pair |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| alice Alice | 4.5 | 107.5 | 4.5 | 30.0% | 17.8% | 0.8% | 0 | 0.5 |
-| bob Bob | 3.5 | 4.5 | 104.5 | 23.3% | 0.8% | 17.5% | 0 | 0.5 |
-| carol Carol | 7 | 491 | 487 | 46.7% | 81.4% | 81.7% | 1 | 0 |
+| member | commits | churn | surviving | formatting (est.) | commit share | churn share | surviving share | post-deadline | pair |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| alice Alice | 4.5 | 107.5 | 4.5 | 0 | 30.0% | 17.8% | 0.8% | 0 | 0.5 |
+| bob Bob | 3.5 | 4.5 | 104.5 | 200 | 23.3% | 0.8% | 17.5% | 0 | 0.5 |
+| carol Carol | 7 | 491 | 487 | 0 | 46.7% | 81.4% | 81.7% | 1 | 0 |
 
 Unattributed: commits=1 churn=1 surviving=1. Excluded: commits=1 surviving=7.
 

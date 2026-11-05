@@ -296,6 +296,19 @@ describe("composite and instructor notes", () => {
   });
 });
 
+describe("empty repository", () => {
+  it("produces a valid report with a warning", async () => {
+    const repo = initRepo(path.join(tmp, "empty"));
+    const { configPath, rosterPath, outDir } = writeConfig(tmp, [repo]);
+    const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true });
+    const t = analysis.teams[0]!;
+    expect(t.totals.commits).toBe(0);
+    expect(t.warnings.length).toBeGreaterThan(0);
+    const md = renderMarkdown(analysis)["team-alpha"]!;
+    expect(md).toContain("Evidence for human review");
+  });
+});
+
 describe("strict exit codes", () => {
   it("exits 3 when unresolved identities exist under --strict", async () => {
     const repo = initRepo(path.join(tmp, "repo"));

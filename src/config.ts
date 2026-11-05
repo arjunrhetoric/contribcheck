@@ -15,7 +15,7 @@ const compositeSchema = z.object({
 }).default({ enabled: false, weights: { commits: 0.2, churn: 0.3, survivingLines: 0.5 } });
 
 const teamSchema = z.object({
-  deadline: z.string(),
+  deadline: z.string().refine((v) => !isNaN(Date.parse(v)), "must be a valid date/time"),
   graceMinutes: z.number().default(0),
   ref: z.string().optional(),
   repos: z.array(z.string()).min(1),
@@ -23,7 +23,7 @@ const teamSchema = z.object({
 
 const configSchema = z.object({
   timezone: z.string().min(1),
-  courseStart: z.string().optional(),
+  courseStart: z.string().refine((v) => !isNaN(Date.parse(v)), "must be a valid date").optional(),
   includeUnmerged: z.boolean().default(false),
   excludePaths: z.array(z.string()).default([]),
   excludeCommits: z.array(z.string()).default([]),

@@ -77,10 +77,10 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
     L.push("");
     L.push("## Members");
     L.push("");
-    L.push("| member | commits | churn | surviving | commit share | churn share | surviving share | post-deadline | pair |");
-    L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    L.push("| member | commits | churn | surviving | formatting (est.) | commit share | churn share | surviving share | post-deadline | pair |");
+    L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const m of t.members) {
-      L.push(`| ${escapeMdCell(stripControl(m.memberId))} ${escapeMdCell(stripControl(m.name))} | ${fmtNum(m.commits)} | ${fmtNum(m.churnTotal)} | ${fmtNum(m.survivingLines)} | ${fmtPct(m.shares.commits)} | ${fmtPct(m.shares.churn)} | ${fmtPct(m.shares.survivingLines)} | ${fmtNum(m.postDeadlineCommits)} | ${fmtNum(m.pairCommits)} |`);
+      L.push(`| ${escapeMdCell(stripControl(m.memberId))} ${escapeMdCell(stripControl(m.name))} | ${fmtNum(m.commits)} | ${fmtNum(m.churnTotal)} | ${fmtNum(m.survivingLines)} | ${fmtNum(m.formattingLines)} | ${fmtPct(m.shares.commits)} | ${fmtPct(m.shares.churn)} | ${fmtPct(m.shares.survivingLines)} | ${fmtNum(m.postDeadlineCommits)} | ${fmtNum(m.pairCommits)} |`);
     }
     L.push("");
     if (a.configSummary.compositeEnabled || t.members.some((m) => m.composite)) {
@@ -100,7 +100,7 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
     L.push("");
     if (t.flags.length === 0) L.push("No flags.");
     else for (const f of t.flags) {
-      L.push(`- \`${escapeMdCell(f.code)}\` [${f.severity}]${f.memberId ? " " + escapeMdCell(f.memberId) : ""}: ${escapeMdCell(stripControl(f.message))}${f.evidence.length ? " — evidence: " + f.evidence.slice(0, 5).map((e) => escapeMdCell(stripControl(e))).join(", ") : ""}`);
+      L.push(`- \`${escapeMdCell(f.code)}\` [${f.severity}]${f.memberId ? " " + escapeMdCell(stripControl(f.memberId)) : ""}: ${escapeMdCell(stripControl(f.message))}${f.evidence.length ? " — evidence: " + f.evidence.slice(0, 5).map((e) => escapeMdCell(stripControl(e))).join(", ") : ""}`);
     }
     L.push("");
     L.push("## Evidence (capped at 25 per metric)");
@@ -156,14 +156,14 @@ export function renderHtml(analysis: Analysis, opts?: { redact?: boolean; config
       }
       weeks += `<h3>${escapeHtml(stripControl(m.memberId))} ${escapeHtml(stripControl(m.name))}</h3><div>${bars}</div><p>${escapeHtml(allWeeks.join(", ") || "no weeks")}</p>`;
     }
-    const flags = t.flags.map((f) => `<li><code>${escapeHtml(f.code)}</code> [${escapeHtml(f.severity)}]${f.memberId ? " " + escapeHtml(f.memberId) : ""}: ${escapeHtml(stripControl(f.message))}</li>`).join("");
-    const rows = t.members.map((m) => `<tr><td>${escapeHtml(stripControl(m.memberId))} ${escapeHtml(stripControl(m.name))}</td><td>${m.commits}</td><td>${m.churnTotal}</td><td>${m.survivingLines}</td><td>${fmtPct(m.shares.commits)}</td><td>${fmtPct(m.shares.churn)}</td><td>${fmtPct(m.shares.survivingLines)}</td></tr>`).join("");
+    const flags = t.flags.map((f) => `<li><code>${escapeHtml(f.code)}</code> [${escapeHtml(f.severity)}]${f.memberId ? " " + escapeHtml(stripControl(f.memberId)) : ""}: ${escapeHtml(stripControl(f.message))}</li>`).join("");
+    const rows = t.members.map((m) => `<tr><td>${escapeHtml(stripControl(m.memberId))} ${escapeHtml(stripControl(m.name))}</td><td>${m.commits}</td><td>${m.churnTotal}</td><td>${m.survivingLines}</td><td>${m.formattingLines}</td><td>${fmtPct(m.shares.commits)}</td><td>${fmtPct(m.shares.churn)}</td><td>${fmtPct(m.shares.survivingLines)}</td></tr>`).join("");
     const unres = t.unresolvedIdentities.map((u) => `<li>${escapeHtml(stripControl(u.name))} &lt;${escapeHtml(stripControl(u.email))}&gt; — ${u.commitCount}, sample ${escapeHtml(u.sampleSha)}</li>`).join("");
     const evItems = Object.entries(t.evidence).slice(0, 10).map(([k, v]) => `<li>${escapeHtml(stripControl(k))}: ${v.slice(0, 5).map((e) => escapeHtml(stripControl(e))).join(", ")}</li>`).join("");
     const subjects = (t.evidence["subjects"] ?? []).slice(0, 10).map((s) => `<li>${escapeHtml(stripControl(s))}</li>`).join("");
-    const comps = t.members.filter((m) => m.composite).map((m) => `<li>${escapeHtml(m.memberId)}: ${m.composite!.value} — ${escapeHtml(m.composite!.formula)}; components ${escapeHtml(JSON.stringify(m.composite!.components))}</li>`).join("");
-    const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(x.memberId)}: ${escapeHtml(stripControl(x.note))}</li>`).join("");
-    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
+    const comps = t.members.filter((m) => m.composite).map((m) => `<li>${escapeHtml(stripControl(m.memberId))}: ${m.composite!.value} — ${escapeHtml(m.composite!.formula)}; components ${escapeHtml(JSON.stringify(m.composite!.components))}</li>`).join("");
+    const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(stripControl(x.memberId))}: ${escapeHtml(stripControl(x.note))}</li>`).join("");
+    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>formatting (est.)</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
   }
   return out;
 }
@@ -176,7 +176,7 @@ export function renderCsv(analysis: Analysis, opts?: { redact?: boolean }): stri
   const lines = [header.join(",")];
   for (const t of a.teams) {
     for (const m of t.members) {
-      const row = [t.teamId, m.memberId, m.name, m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? "", m.composite?.value ?? ""];
+      const row = [stripControl(t.teamId), stripControl(m.memberId), stripControl(m.name), m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? "", m.composite?.value ?? ""];
       lines.push(row.map((v) => csvCell(String(v))).join(","));
     }
   }

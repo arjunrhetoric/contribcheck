@@ -197,8 +197,11 @@ async function checkAttrBatch(repoPath: string, ref: string, files: string[]): P
     const input = files.map((f) => `${ref}:${f}`).join("\x00");
     void input;
     // Simpler: pass paths directly in chunks
+    // `git check-attr` reads the working tree's attributes; `--source` is not
+    // available on the oldest supported git (2.23), so we do not pass the ref.
+    void ref;
     const chunk = files.slice(0, 500);
-    const { stdout } = await gitExec(repoPath, ["check-attr", "linguist-generated", "linguist-vendored", `${ref}`, "--", ...chunk]);
+    const { stdout } = await gitExec(repoPath, ["check-attr", "linguist-generated", "linguist-vendored", "--", ...chunk]);
     for (const line of stdout.split("\n")) {
       const m = line.match(/^(.+):\s+(\S+):\s+(\S+)\s*$/);
       if (!m) continue;
@@ -556,8 +559,6 @@ async function scanTeam(
     }
   }
 
-  const excludeSet = new Set(config.excludePaths);
-  void excludeSet;
 
   for (const e of sortedRaw) {
     const { raw, repoPath, onRef } = e;
@@ -611,7 +612,7 @@ async function scanTeam(
     // exclusion reasons in order
     let exclusionReason: string | null = null;
     if (isMerge) exclusionReason = "merge-commit";
-    else if (config.excludeCommits.includes(raw.sha.toLowerCase())) exclusionReason = "excluded-sha";
+    else if (config.excludeCommits.some((x) => x.length >= 4 && raw.sha.toLowerCase().startsWith(x))) exclusionReason = "excluded-sha";
     else {
       const bot = isBotAddress(raw.mailmapName, raw.mailmapEmail, login, config.bots);
       if (bot) exclusionReason = "bot";
@@ -698,11 +699,9 @@ async function scanTeam(
 
     // duplicate handling: same patch+author counted once
     const dupOf = duplicateOf.get(raw.sha) ?? null;
-    let isDuplicateCountedOnce = false;
     if (dupOf && !exclusionReason) {
       // same author duplicate: mark excluded-duplicate (counts as activity? spec: count the first, mark other as duplicate that links to it)
       exclusionReason = `duplicate-of:${dupOf.slice(0, 7)}`;
-      isDuplicateCountedOnce = true;
       shares = [{ memberId: null, share: 1, role: "excluded" as const, method: "duplicate" }];
     }
     // different-author same patch: both count + DUPLICATE_PATCH flag
@@ -715,7 +714,6 @@ async function scanTeam(
         evidence: [raw.sha, patchFirst.get(pid)!],
       });
     }
-    void isDuplicateCountedOnce;
 
     // dates
     const authorDate = parseDateFlexible(raw.authorDate);
@@ -836,10 +834,6 @@ async function scanTeam(
   const unattributed = { commits: 0, churnAdded: 0, churnDeleted: 0, churnTotal: 0, survivingLines: 0 };
   const excluded = { commits: 0, churnAdded: 0, churnDeleted: 0, churnTotal: 0, survivingLines: 0 };
   const unresolvedMap = new Map<string, { name: string; email: string; count: number; sample: string }>();
-
-  const countedCommits = attributed.filter((c) => !c.exclusionReason || c.exclusionReason.startsWith("duplicate-of") ? false : c.exclusionReason !== null ? false : true);
-  // Note: duplicates excluded above; empty commits included (zero churn)
-  void countedCommits;
 
   for (const c of attributed) {
     const authorDate = parseDateFlexible(c.authorDate);

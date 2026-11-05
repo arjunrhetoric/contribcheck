@@ -127,7 +127,7 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
     L.push("## Instructor notes");
     L.push("");
     if (notes.length === 0) L.push("None. (adjustments.yaml entries never change computed numbers.)");
-    else for (const nn of notes) L.push(`- ${escapeMdCell(stripControl(nn.memberId))}: ${escapeMdCell(stripControl(nn.note))}`);
+    else for (const nn of notes) L.push(`- ${escapeMdCell(stripControl(nn.memberId))}: ${escapeMdCell(stripControl(redact ? redactText(nn.note, r) : nn.note))}`);
     L.push("");
     L.push("## Limitations");
     L.push("");
@@ -162,7 +162,7 @@ export function renderHtml(analysis: Analysis, opts?: { redact?: boolean; config
     const evItems = Object.entries(t.evidence).slice(0, 10).map(([k, v]) => `<li>${escapeHtml(stripControl(k))}: ${v.slice(0, 5).map((e) => escapeHtml(stripControl(e))).join(", ")}</li>`).join("");
     const subjects = (t.evidence["subjects"] ?? []).slice(0, 10).map((s) => `<li>${escapeHtml(stripControl(s))}</li>`).join("");
     const comps = t.members.filter((m) => m.composite).map((m) => `<li>${escapeHtml(stripControl(m.memberId))}: ${m.composite!.value} — ${escapeHtml(m.composite!.formula)}; components ${escapeHtml(JSON.stringify(m.composite!.components))}</li>`).join("");
-    const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(stripControl(x.memberId))}: ${escapeHtml(stripControl(x.note))}</li>`).join("");
+    const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(stripControl(x.memberId))}: ${escapeHtml(stripControl(redact ? redactText(x.note, r) : x.note))}</li>`).join("");
     out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>formatting (est.)</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
   }
   return out;
@@ -190,6 +190,7 @@ export function renderExplain(analysis: Analysis, memberId: string, view: "instr
   const m = team.members.find((x) => x.memberId === memberId);
   if (!m) throw new Error(`Member "${memberId}" not found in team ${team.teamId}`);
   if (format === "json") {
+    const ownEvidence = Object.fromEntries(Object.entries(team.evidence).filter(([k]) => k.endsWith(":" + memberId)));
     if (view === "student") {
       return JSON.stringify({
         member: m,
@@ -200,9 +201,10 @@ export function renderExplain(analysis: Analysis, memberId: string, view: "instr
           survivingLines: team.unattributed.survivingLines,
         },
         flags: team.flags.filter((f) => f.memberId === memberId),
+        evidence: ownEvidence,
       }, null, 2);
     }
-    return JSON.stringify({ member: m, team }, null, 2);
+    return JSON.stringify({ member: m, team, evidence: ownEvidence }, null, 2);
   }
   const L: string[] = [];
   L.push("> Evidence for human review. This is not a grade.");
@@ -232,6 +234,13 @@ export function renderExplain(analysis: Analysis, memberId: string, view: "instr
     L.push("## Instructor notes");
     if (notes.length === 0) L.push("None.");
     for (const n of notes) L.push(`- ${escapeMdCell(stripControl(n.note))}`);
+  }
+  const ownEvidence = Object.entries(team.evidence).filter(([k]) => k.endsWith(":" + memberId));
+  L.push("");
+  L.push("## Evidence for this member");
+  if (ownEvidence.length === 0) L.push("None.");
+  for (const [k, v] of ownEvidence) {
+    L.push(`- ${escapeMdCell(stripControl(k))}: ${v.slice(0, 25).map((e) => escapeMdCell(stripControl(e))).join(", ")}`);
   }
   return L.join("\n");
 }

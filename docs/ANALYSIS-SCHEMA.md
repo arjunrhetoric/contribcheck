@@ -77,6 +77,7 @@ interface MemberMetrics {
   churnAdded: number;
   churnDeleted: number;
   churnTotal: number;           // added + deleted, fractional
+  churn: { added: number; deleted: number; total: number }; // same values, grouped
   formattingLines: number;      // estimate, not counted
   survivingLines: number;       // fractional blame lines
   areas: Record<string, number>; // churn per configured area

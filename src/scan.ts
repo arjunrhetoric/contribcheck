@@ -168,17 +168,15 @@ async function numstatFor(repoPath: string, sha: string, extraArgs: string[]): P
       } else {
         // handle rename "old => new"
         let fp = p;
-        const arrow = p.indexOf(" => ");
-        if (arrow >= 0) {
-          // formats like "a/{old => new}/f" or "old => new"; take new side
-          const parts = p.split(" => ");
-          fp = parts[parts.length - 1];
-          // strip braces prefix
-          const brace = fp.indexOf("}");
-          if (p.includes("{") && brace >= 0) {
-            const prefix = p.slice(0, p.indexOf("{"));
-            fp = prefix + fp;
-          }
+        const braceStart = p.indexOf("{");
+        const braceEnd = p.indexOf("}", braceStart + 1);
+        if (p.includes(" => ") && braceStart >= 0 && braceEnd > braceStart) {
+          const before = p.slice(0, braceStart);
+          const inside = p.slice(braceStart + 1, braceEnd);
+          const after = p.slice(braceEnd + 1);
+          fp = before + inside.split(" => ").pop()! + after;
+        } else if (p.includes(" => ")) {
+          fp = p.split(" => ").pop()!;
         }
         rows.push({ path: fp.trim(), added: Number(a) || 0, deleted: Number(d) || 0, binary: false });
       }
@@ -236,12 +234,12 @@ export interface ScanResult {
 
 export async function scan(opts: ScanOptions): Promise<ScanResult> {
   await checkGitVersion();
-  const config: AppConfig = loadConfig(opts.configPath, { out: opts.out });
-  detectTokenInConfig(path.resolve(opts.configPath));
+  const config: AppConfig = loadConfig(opts.configPath ?? "contribcheck.yaml", { out: opts.out });
+  detectTokenInConfig(path.resolve(opts.configPath ?? "contribcheck.yaml"));
   const rosterPath = opts.rosterPath ?? path.join(config.__configDir, "roster.csv");
   const roster = loadRoster(rosterPath, config);
   const includeUnmerged = opts.includeUnmerged ?? config.includeUnmerged;
-  const githubEnabled = opts.github ?? config.github.enabled;
+  const githubEnabled = opts.github ?? (opts.githubClient ? true : config.github.enabled);
 
   // Output dir guard
   const outDir = path.resolve(opts.out ?? config.__outDir);
@@ -270,8 +268,8 @@ export async function scan(opts: ScanOptions): Promise<ScanResult> {
     throw err;
   }
 
-  const gh = githubEnabled ? new GitHubClient({ dir: path.join(await cacheDirFor(config), "cache") }) : null;
-  if (gh) gh.requireToken();
+  const gh = githubEnabled ? (opts.githubClient ?? new GitHubClient({ dir: path.join(await cacheDirFor(config), "cache") })) : null;
+  if (gh && !opts.githubClient) gh.requireToken();
 
   const generatedAt = new Date().toISOString();
   const teams: TeamAnalysis[] = [];
@@ -406,6 +404,7 @@ async function scanTeam(
   const warnings: string[] = [];
   warnings.push("Git dates are self-reported and may be wrong; treat them as evidence, not facts.");
   const flags: Flag[] = [];
+  let starterWarned = false;
   const evidence: Record<string, string[]> = {};
   const addEvidence = (k: string, v: string) => {
     if (!evidence[k]) evidence[k] = [];
@@ -427,7 +426,15 @@ async function scanTeam(
   for (let repoIdx = 0; repoIdx < t.repos.length; repoIdx++) {
     const repoPath = t.repos[repoIdx]!;
     if (!fs.existsSync(repoPath)) throw new Error(`Repository not found: ${repoPath}`);
-    const shallow = await isShallow(repoPath);
+    let shallow = await isShallow(repoPath);
+    if (shallow && o.unshallow) {
+      try {
+        await gitExec(repoPath, ["fetch", "--unshallow"]);
+        shallow = await isShallow(repoPath);
+      } catch (e) {
+        warnings.push(`fetch --unshallow failed for ${repoPath}: ${(e as Error).message}`);
+      }
+    }
     if (shallow) {
       shallowAny = true;
       flags.push({
@@ -435,13 +442,6 @@ async function scanTeam(
         message: `Repository ${repoPath} is a shallow clone; history and blame are incomplete. Innocent explanation: cloned with --depth to save time or disk.`,
         evidence: [repoPath],
       });
-      if (o.unshallow) {
-        try {
-          await gitExec(repoPath, ["fetch", "--unshallow"]);
-        } catch (e) {
-          warnings.push(`fetch --unshallow failed for ${repoPath}: ${(e as Error).message}`);
-        }
-      }
     }
     const { ref, used } = await resolveRef(repoPath, t.ref);
     let headSha = "";
@@ -494,6 +494,7 @@ async function scanTeam(
   }
 
   // GitHub bulk author map
+  if (allBySha.size === 1) warnings.push("Only one commit is reachable from the team ref; history is very short and results are limited.");
   const apiLoginBySha = new Map<string, string>();
   const prBySquashSha = new Map<string, number>();
   const prCommitsCache = new Map<number, { sha: string; authorLogin: string | null; authorEmail: string; authorName: string; stats?: { additions: number; deletions: number } }[]>();
@@ -623,6 +624,10 @@ async function scanTeam(
           const rr = resolveIdentity(raw.mailmapName, raw.mailmapEmail, teamRoster, login);
           if (!rr.memberId) {
             exclusionReason = "starter-code";
+            if (!starterWarned) {
+              starterWarned = true;
+              warnings.push("STARTER_CODE: shared non-roster commits were excluded as starter code; confirm with the instructor.");
+            }
             flags.push({
               code: "STARTER_CODE", severity: "info",
               message: `Commit ${raw.sha.slice(0, 7)} appears in every repository and is by a non-roster author; treated as starter code. Innocent explanation: instructor template import shared across forks.`,
@@ -730,14 +735,14 @@ async function scanTeam(
       flags.push({
         code: "LARGE_COMMIT", severity: "review",
         message: `Commit ${raw.sha.slice(0, 7)} is large (${added + deleted} lines, ${nFiles} files); often an import. Innocent explanation: bulk import, generated files missed by exclusions, or initial commit.`,
-        evidence: [raw.sha],
+        evidence: [raw.sha, ...files.slice(0, 5).map((f) => f.path)],
       });
     }
     if (isSquashCandidate && !exclusionReason && !squashDistribution) {
       flags.push({
         code: "SQUASH_UNRESOLVED", severity: "info",
         message: `Commit ${raw.sha.slice(0, 7)} looks like a squash merge (#${squashPrNumber}) but no pull request data was available; credited to the listed author as an approximation. Innocent explanation: merged via UI without API access.`,
-        evidence: [raw.sha],
+        evidence: [raw.sha, ...(squashPrNumber ? [`PR #${squashPrNumber}`] : [])],
       });
     }
     if (dateAnomaly) {
@@ -864,8 +869,8 @@ async function scanTeam(
         }
         if (c.postDeadline) a.postDeadline += wCommits;
         if (isPair && config.coAuthorCredit !== null) {
-          // pairCommits counts co-authored commits regardless of setting
-          a.pair += wCommits;
+          // pairCommits counts co-authored commits regardless of credit setting
+          a.pair += 1;
         }
         for (const f of c.files) {
           a.files.add(f.path);
@@ -1006,13 +1011,17 @@ async function scanTeam(
       const w = config.composite.weights;
       const comps: Record<string, number | null> = { commits: shares.commits, churn: shares.churn, survivingLines: shares.survivingLines };
       const avail = Object.entries(comps).filter(([, v]) => v !== null) as [string, number][];
-      const wSum = avail.reduce((s, [k]) => s + (w as Record<string, number>)[k]!, 0);
-      const value = wSum > 0 ? avail.reduce((s, [k, v]) => s + (v * (w as Record<string, number>)[k]!) / wSum, 0) : 0;
-      composite = {
-        value: round2(value * 10000) / 10000,
-        formula: `composite = (${w.commits}*commits + ${w.churn}*churn + ${w.survivingLines}*surviving) / renormalized over available dimensions`,
-        components: comps,
-      };
+      if (avail.length === 0) {
+        composite = null;
+      } else {
+        const wSum = avail.reduce((s, [k]) => s + (w as Record<string, number>)[k]!, 0);
+        const value = wSum > 0 ? avail.reduce((s, [k, v]) => s + (v * (w as Record<string, number>)[k]!) / wSum, 0) : 0;
+        composite = {
+          value: round2(value * 10000) / 10000,
+          formula: `composite = (${w.commits}*commits + ${w.churn}*churn + ${w.survivingLines}*surviving) / renormalized over available dimensions`,
+          components: comps,
+        };
+      }
     }
     return {
       memberId: m.member_id, name: m.name,
@@ -1020,6 +1029,11 @@ async function scanTeam(
       churnAdded: round2(a.added * 100) / 100,
       churnDeleted: round2(a.deleted * 100) / 100,
       churnTotal: round2(churnTotal * 100) / 100,
+      churn: {
+        added: round2(a.added * 100) / 100,
+        deleted: round2(a.deleted * 100) / 100,
+        total: round2(churnTotal * 100) / 100,
+      },
       formattingLines: Math.round(a.formatting),
       survivingLines: round2(a.surviving * 100) / 100,
       areas, filesTouched: a.files.size, activeDays: a.days.size,
@@ -1064,7 +1078,7 @@ async function scanTeam(
       flags.push({
         code: "NO_ACTIVITY", severity: "review", memberId: m.memberId,
         message: `${m.memberId} has zero credited commits${prCollected ? " and no PR activity" : ""}. Innocent explanation: non-code work (design, docs, testing) or commits under another identity.`,
-        evidence: [],
+        evidence: ["commits: 0", ...(prCollected ? ["PR activity: 0"] : [])],
       });
     }
   }
@@ -1174,7 +1188,7 @@ async function blameFile(repoPath: string, ref: string, file: string, cacheDir: 
   const out: BlameLine[] = [];
   let cur: BlameLine | null = null;
   for (const line of stdout.split("\n")) {
-    const m = line.match(/^([0-9a-f]{40}) \d+ \d+( \d+)?$/);
+    const m = line.match(/^([0-9a-f]{40,64}) \d+ \d+( \d+)?$/);
     if (m) {
       if (cur) out.push(cur);
       cur = { commit: m[1], authorName: "", authorEmail: "" };
@@ -1203,6 +1217,7 @@ export function loadAdjustments(configDir: string): { memberId: string; team: st
   if (!fs.existsSync(f)) return [];
   try {
     const data = yamlParse(fs.readFileSync(f, "utf8")) as unknown;
+    if (Array.isArray(data)) return data as { memberId: string; team: string; note: string }[];
     if (!data || typeof data !== "object") return [];
     const adj = (data as { adjustments?: { memberId: string; team: string; note: string }[] }).adjustments;
     if (Array.isArray(adj)) return adj;

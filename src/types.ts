@@ -67,6 +67,7 @@ export interface MemberMetrics {
   churnAdded: number;
   churnDeleted: number;
   churnTotal: number;
+  churn: { added: number; deleted: number; total: number };
   formattingLines: number;
   survivingLines: number;
   areas: Record<string, number>;
@@ -147,12 +148,15 @@ export interface Analysis {
   teams: TeamAnalysis[];
 }
 
+import type { GitHubClient } from "./github.js";
+
 export interface ScanOptions {
-  configPath: string;
-  rosterPath: string;
+  configPath?: string;
+  rosterPath?: string;
   team?: string;
   out?: string;
   github?: boolean;
+  githubClient?: GitHubClient;
   includeUnmerged?: boolean;
   skipBlame?: boolean;
   strict?: boolean;

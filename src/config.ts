@@ -46,7 +46,11 @@ export function formatZodError(e: z.ZodError): string {
 
 export function loadConfig(configPath: string, overrides?: { out?: string }): AppConfig {
   const abs = path.resolve(configPath);
-  if (!fs.existsSync(abs)) throw new Error(`Config not found: ${abs} (code 2)`);
+  if (!fs.existsSync(abs)) {
+    const err = new Error(`Config not found: ${abs}`);
+    (err as unknown as { code: number }).code = 2;
+    throw err;
+  }
   const raw = fs.readFileSync(abs, "utf8");
   let data: unknown;
   try {
@@ -151,6 +155,7 @@ export function loadRoster(rosterPath: string, config: AppConfig): RosterMember[
     for (const e of emails) {
       const k = e.toLowerCase();
       if (emailOwner.has(k)) {
+        if (emailOwner.get(k) === member_id) continue;
         const err = new Error(`Invalid roster at ${line}: email "${e}" belongs to two members ("${emailOwner.get(k)}" and "${member_id}")`);
         (err as unknown as { code: number }).code = 2;
         throw err;
@@ -172,6 +177,11 @@ export function detectTokenInConfig(configPath: string): void {
   const raw = fs.readFileSync(path.resolve(configPath), "utf8");
   // ghp_, gho_, github_pat_, gh token pattern
   if (/(ghp_[A-Za-z0-9]{10,}|gho_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|gh_[A-Za-z0-9]{10,})/.test(raw)) {
+    const err = new Error("Refusing to run: config file appears to contain a GitHub token. Keep tokens in GITHUB_TOKEN/GH_TOKEN only.");
+    (err as unknown as { code: number }).code = 2;
+    throw err;
+  }
+  if (/^\s*(github[_-]?token|gh[_-]?token)\s*:\s*\S+/im.test(raw)) {
     const err = new Error("Refusing to run: config file appears to contain a GitHub token. Keep tokens in GITHUB_TOKEN/GH_TOKEN only.");
     (err as unknown as { code: number }).code = 2;
     throw err;

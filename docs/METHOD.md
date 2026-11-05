@@ -63,7 +63,7 @@ The container gets two weights per author:
 
 ```
 commitShare_i = c_i / Σ c                  (or 1/n when Σ c = 0)
-churnShare_i  = w_i / Σ w                  (or commitShare_i when Σ w = 0)
+churnShare_i  = w_i / Σ w                  (or 1/n when Σ w = 0)
 ```
 
 Commit counts use `commitShare`; churn uses `churnShare`; surviving lines use `churnShare`. Both vectors sum to 1. For all non-squash commits the two weights equal the ordinary share.

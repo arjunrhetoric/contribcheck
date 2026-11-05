@@ -27,7 +27,7 @@ describe("co-author split + totals reconcile", () => {
     const bob = t.members.find((m) => m.memberId === "bob")!;
     expect(alice.commits).toBeCloseTo(1.5, 6);
     expect(bob.commits).toBeCloseTo(0.5, 6);
-    expect(alice.pairCommits).toBeCloseTo(0.5, 6);
+    expect(alice.pairCommits).toBe(1);
     // totals reconcile
     const sumCommits = t.members.reduce((a, m) => a + m.commits, 0) + t.unattributed.commits + t.excluded.commits;
     expect(sumCommits).toBeCloseTo(t.totals.commits, 6);

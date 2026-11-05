@@ -89,7 +89,9 @@ export class GitHubClient {
     if (res.status === 403 || res.status === 429) {
       const retryAfter = res.headers.get("retry-after");
       const reset = res.headers.get("x-ratelimit-reset");
-      if (attempt < 5) {
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      const rateLimited = res.status === 429 || remaining === "0" || !!retryAfter || !!reset;
+      if (rateLimited && attempt < 5) {
         let waitMs = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
         if (retryAfter) waitMs = Number(retryAfter) * 1000;
         else if (reset) {
@@ -99,7 +101,6 @@ export class GitHubClient {
         await sleep(Math.min(waitMs, 30000));
         return this.request(url, attempt + 1);
       }
-      const remaining = res.headers.get("x-ratelimit-remaining");
       if (remaining === "0") throw new Error(this.sanitizeError("GitHub rate limit exhausted. Re-run later; the cache makes re-runs cheap."));
       throw new Error(this.sanitizeError(`GitHub request failed: ${url} -> ${res.status}`));
     }

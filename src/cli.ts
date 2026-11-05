@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, loadRoster } from "./config.js";
+import { loadConfig, loadRoster, detectTokenInConfig } from "./config.js";
 import { checkGitVersion, gitExec, isShallow } from "./git.js";
 import { loadAnalysis, scan } from "./scan.js";
 import { renderExplain, writeReports, type ReportFormat } from "./report.js";
@@ -20,7 +20,7 @@ function exitCode(e: unknown): number {
   const code = (e as { code?: number })?.code;
   if (code === 2 || code === 3) return code;
   const msg = (e as Error)?.message ?? "";
-  if (/invalid config|invalid roster|not found|refus/i.test(msg)) return 2;
+  if (/invalid config|invalid roster|refus/i.test(msg)) return 2;
   return 1;
 }
 
@@ -86,6 +86,7 @@ program.command("doctor").description("check git version, config, roster, shallo
   try {
     await checkGitVersion();
     const config = loadConfig(cmdOpts.config);
+    detectTokenInConfig(path.resolve(cmdOpts.config));
     const roster = loadRoster(cmdOpts.roster, config);
     const shallow: Record<string, boolean> = {};
     for (const t of Object.values(config.teams)) for (const r of t.repos) {
@@ -133,7 +134,7 @@ program.command("scan").description("scan repositories and write analysis.json")
         unshallow: (cmdOpts["unshallow"] as boolean) ?? false,
         noTimestamp: (cmdOpts["timestamp"] as boolean) === false ? true : false,
         allowInRepo: (cmdOpts["allowInRepo"] as boolean) ?? false,
-        quiet: (g["quiet"] as boolean) ?? false,
+        quiet: ((g["quiet"] as boolean) ?? false) || ((g["json"] as boolean) ?? false),
         verbose: (g["verbose"] as boolean) ?? false,
       });
       if (g["json"]) console.log(JSON.stringify({ ok: true, out: res.outDir, analysis: res.analysisPath }));
@@ -186,12 +187,23 @@ program.command("report").description("render human reports from analysis.json")
 
 program.command("explain <memberId>").description("explain one member").option("--team <t>").option("--view <v>", "instructor|student", "instructor").option("--format <f>", "md|json", "md").option("--analysis <p>").option("--config <p>", "config path (for instructor notes)", "contribcheck.yaml").action(async (memberId: string, cmdOpts: { team?: string; view: string; format: string; analysis?: string; config: string }) => {
   try {
+    if (cmdOpts.view !== "instructor" && cmdOpts.view !== "student") {
+      const err = new Error(`Unknown view "${cmdOpts.view}". Use instructor or student.`);
+      (err as unknown as { code: number }).code = 2;
+      throw err;
+    }
+    if (cmdOpts.format !== "md" && cmdOpts.format !== "json") {
+      const err = new Error(`Unknown explain format "${cmdOpts.format}". Use md or json.`);
+      (err as unknown as { code: number }).code = 2;
+      throw err;
+    }
     const ap = cmdOpts.analysis ?? path.join(process.cwd(), "contribcheck-out", "analysis.json");
     const a = await loadAnalysis(ap);
     const cfgPath = path.resolve(cmdOpts.config);
     const configDir = fs.existsSync(cfgPath) ? path.dirname(cfgPath) : undefined;
-    const out = renderExplain(a, memberId, cmdOpts.view as "instructor" | "student", cmdOpts.team, cmdOpts.format as "md" | "json", { configDir });
-    console.log(cmdOpts.format === "json" ? out : stripControl(out));
+    const fmt = ((program.opts() as { json?: boolean }).json ? "json" : cmdOpts.format) as "md" | "json";
+    const out = renderExplain(a, memberId, cmdOpts.view as "instructor" | "student", cmdOpts.team, fmt, { configDir });
+    console.log(fmt === "json" ? out : stripControl(out));
   } catch (e) { handleErr(e, program.opts()); }
 });
 

@@ -9,6 +9,7 @@ const BUILTIN_BOTS = new Set([
   "dependabot", "renovate", "github-actions", "codecov", "dependabot[bot]",
   "renovate[bot]", "github-actions[bot]", "codecov[bot]", "deepsource", "snyk-bot",
   "allcontributors", "imgbot", "netlify", "vercel", "heroku",
+  "greenkeeper", "mergify", "stale", "whitesource", "pre-commit-ci",
 ]);
 
 export function isBotAddress(name: string, email: string, login: string | null, extraBots: string[]): boolean {
@@ -108,7 +109,7 @@ export function attribute(input: AttributeInput): Share[] {
     const n = dist.length;
     const shares: Share[] = dist.map((d) => {
       const commitShare = totalCommits > 0 ? d.commits / totalCommits : 1 / n;
-      const churnShare = totalChurn > 0 ? d.churn / totalChurn : commitShare;
+      const churnShare = totalChurn > 0 ? d.churn / totalChurn : 1 / n;
       return {
         memberId: d.memberId,
         share: churnShare,

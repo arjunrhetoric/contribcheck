@@ -117,6 +117,10 @@ interface PrMetrics {
 
 Without `--github`, `pr` is `null` and reports say “not collected”.
 
+### Shares
+
+Internally each share is `{ memberId, share, role, method }`, and squash containers may also carry `commitShare` and `churnShare` because commit counts and churn can be weighted differently. Normal commits use the same weight for every metric. The exported per-member `shares` object contains only the three final ratios.
+
 ### Buckets
 
 ```ts

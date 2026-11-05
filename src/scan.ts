@@ -401,6 +401,7 @@ async function scanTeam(
   o: TeamScanOpts,
 ): Promise<TeamAnalysis> {
   const warnings: string[] = [];
+  warnings.push("Git dates are self-reported and may be wrong; treat them as evidence, not facts.");
   const flags: Flag[] = [];
   const evidence: Record<string, string[]> = {};
   const addEvidence = (k: string, v: string) => {
@@ -769,6 +770,10 @@ async function scanTeam(
         if (!parsed) continue;
         const base = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`;
         const prNums = new Set<number>([...prBySquashSha.values()]);
+        let repoIssueComments: { user: { login: string } | null; issue_url?: string }[] = [];
+        try {
+          repoIssueComments = await o.gh.paginated<{ user: { login: string } | null; issue_url?: string }>(`${base}/issues/comments`);
+        } catch { repoIssueComments = []; }
         const bumpLogin = (login: string | null | undefined, field: string) => {
           if (!login) return;
           const mem = teamRoster.find((m) => m.github?.toLowerCase() === login.toLowerCase());
@@ -787,7 +792,10 @@ async function scanTeam(
             }
             const revs = await o.gh.paginated<{ user: { login: string } | null; state: string }>(`${base}/pulls/${n}/reviews`);
             const inlines = await o.gh.paginated<{ user: { login: string } | null }>(`${base}/pulls/${n}/comments`);
-            const issues = await o.gh.paginated<{ user: { login: string } | null }>(`${base}/issues/${n}/comments`);
+            const issues = repoIssueComments.filter((c) => {
+              const m = c.issue_url?.match(/\/issues\/(\d+)$/);
+              return m ? Number(m[1]) === n : false;
+            });
             for (const rv of revs) {
               if (rv.state === "APPROVED") {
                 bumpLogin(rv.user?.login, "reviewsApproved");
@@ -892,6 +900,7 @@ async function scanTeam(
   // Blame
   const blameCacheDir = path.join(await cacheDirFor(config), "blame");
   const survivingByMember = new Map<string, number>();
+  const survivingFilesByMember = new Map<string, Map<string, number>>();
   let unattributedSurviving = 0;
   let excludedSurviving = 0;
   if (!o.skipBlame) {
@@ -935,6 +944,9 @@ async function scanTeam(
             const w = s.share * 1;
             if (s.memberId && acc.has(s.memberId)) {
               survivingByMember.set(s.memberId, (survivingByMember.get(s.memberId) ?? 0) + w);
+              const fm = survivingFilesByMember.get(s.memberId) ?? new Map<string, number>();
+              fm.set(f, (fm.get(f) ?? 0) + w);
+              survivingFilesByMember.set(s.memberId, fm);
             } else {
               unattributedSurviving += w;
             }
@@ -944,6 +956,11 @@ async function scanTeam(
     }
   }
   for (const [mid, v] of survivingByMember) acc.get(mid)!.surviving = v;
+  for (const [mid, files] of survivingFilesByMember) {
+    for (const [f, count] of [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 25)) {
+      addEvidence(`surviving:${mid}`, `${f}: ${Math.round(count)} line(s)`);
+    }
+  }
   unattributed.survivingLines = unattributedSurviving;
   excluded.survivingLines = excludedSurviving;
 

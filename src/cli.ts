@@ -184,11 +184,13 @@ program.command("report").description("render human reports from analysis.json")
     } catch (e) { handleErr(e, program.opts()); }
   });
 
-program.command("explain <memberId>").description("explain one member").option("--team <t>").option("--view <v>", "instructor|student", "instructor").option("--format <f>", "md|json", "md").option("--analysis <p>").action(async (memberId: string, cmdOpts: { team?: string; view: string; format: string; analysis?: string }) => {
+program.command("explain <memberId>").description("explain one member").option("--team <t>").option("--view <v>", "instructor|student", "instructor").option("--format <f>", "md|json", "md").option("--analysis <p>").option("--config <p>", "config path (for instructor notes)", "contribcheck.yaml").action(async (memberId: string, cmdOpts: { team?: string; view: string; format: string; analysis?: string; config: string }) => {
   try {
     const ap = cmdOpts.analysis ?? path.join(process.cwd(), "contribcheck-out", "analysis.json");
     const a = await loadAnalysis(ap);
-    const out = renderExplain(a, memberId, cmdOpts.view as "instructor" | "student", cmdOpts.team, cmdOpts.format as "md" | "json");
+    const cfgPath = path.resolve(cmdOpts.config);
+    const configDir = fs.existsSync(cfgPath) ? path.dirname(cfgPath) : undefined;
+    const out = renderExplain(a, memberId, cmdOpts.view as "instructor" | "student", cmdOpts.team, cmdOpts.format as "md" | "json", { configDir });
     console.log(cmdOpts.format === "json" ? out : stripControl(out));
   } catch (e) { handleErr(e, program.opts()); }
 });

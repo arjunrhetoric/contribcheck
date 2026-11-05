@@ -18,7 +18,10 @@ function newRedactor(): Redactor {
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
 function redactText(s: string, r: Redactor): string {
-  return s.replace(EMAIL_RE, (m) => pseudonym("email", m, r.seed, r.counters));
+  let out = s.replace(EMAIL_RE, (m) => pseudonym("email", m, r.seed, r.counters));
+  out = out.replace(/\b([A-Za-z0-9][A-Za-z0-9-]{0,38}) approved PR #(\d+)/g, (m, login: string, num: string) =>
+    `${pseudonym("login", login, r.seed, r.counters)} approved PR #${num}`);
+  return out;
 }
 
 function redactAnalysis(analysis: Analysis, r: Redactor): Analysis {
@@ -80,6 +83,17 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
       L.push(`| ${escapeMdCell(stripControl(m.memberId))} ${escapeMdCell(stripControl(m.name))} | ${fmtNum(m.commits)} | ${fmtNum(m.churnTotal)} | ${fmtNum(m.survivingLines)} | ${fmtPct(m.shares.commits)} | ${fmtPct(m.shares.churn)} | ${fmtPct(m.shares.survivingLines)} | ${fmtNum(m.postDeadlineCommits)} | ${fmtNum(m.pairCommits)} |`);
     }
     L.push("");
+    if (a.configSummary.compositeEnabled || t.members.some((m) => m.composite)) {
+      L.push("## Composite (presentation aid only)");
+      L.push("");
+      L.push("Weights are renormalized over the dimensions that exist. Never read this number alone.");
+      L.push("");
+      for (const m of t.members) {
+        if (!m.composite) continue;
+        L.push(`- ${escapeMdCell(stripControl(m.memberId))}: ${m.composite.value} — ${escapeMdCell(m.composite.formula)}; components: ${escapeMdCell(JSON.stringify(m.composite.components))}`);
+      }
+      L.push("");
+    }
     L.push(`Unattributed: commits=${fmtNum(t.unattributed.commits)} churn=${fmtNum(t.unattributed.churnTotal)} surviving=${fmtNum(t.unattributed.survivingLines)}. Excluded: commits=${t.excluded.commits} surviving=${t.excluded.survivingLines}.`);
     L.push("");
     L.push("## Flags");
@@ -91,7 +105,14 @@ export function renderMarkdown(analysis: Analysis, opts?: { redact?: boolean; co
     L.push("");
     L.push("## Evidence (capped at 25 per metric)");
     L.push("");
-    for (const [k, v] of Object.entries(t.evidence).slice(0, 20)) {
+    const memberIds = new Set(t.members.map((m) => m.memberId));
+    const evidenceKeys = Object.keys(t.evidence).sort((ka, kb) => {
+      const ra = memberIds.has(ka.split(":").slice(1).join(":")) || ka.startsWith("excluded") || ka.startsWith("subjects") ? 0 : 1;
+      const rb = memberIds.has(kb.split(":").slice(1).join(":")) || kb.startsWith("excluded") || kb.startsWith("subjects") ? 0 : 1;
+      return ra - rb || (ka < kb ? -1 : ka > kb ? 1 : 0);
+    });
+    for (const k of evidenceKeys.slice(0, 40)) {
+      const v = t.evidence[k] ?? [];
       L.push(`- ${escapeMdCell(stripControl(k))}: ${v.slice(0, 25).map((e) => escapeMdCell(stripControl(e))).join(", ")}`);
     }
     L.push("");
@@ -120,6 +141,7 @@ export function renderHtml(analysis: Analysis, opts?: { redact?: boolean; config
   const redact = opts?.redact ?? false;
   const r = newRedactor();
   const a = redact ? redactAnalysis(analysis, r) : analysis;
+  const adjustments = opts?.configDir ? loadAdjustments(opts.configDir) : [];
   const out: Record<string, string> = {};
   for (const t of a.teams) {
     const maxWeek = Math.max(1, ...t.members.flatMap((m) => Object.values(m.weeklyCommits)));
@@ -139,7 +161,9 @@ export function renderHtml(analysis: Analysis, opts?: { redact?: boolean; config
     const unres = t.unresolvedIdentities.map((u) => `<li>${escapeHtml(stripControl(u.name))} &lt;${escapeHtml(stripControl(u.email))}&gt; — ${u.commitCount}, sample ${escapeHtml(u.sampleSha)}</li>`).join("");
     const evItems = Object.entries(t.evidence).slice(0, 10).map(([k, v]) => `<li>${escapeHtml(stripControl(k))}: ${v.slice(0, 5).map((e) => escapeHtml(stripControl(e))).join(", ")}</li>`).join("");
     const subjects = (t.evidence["subjects"] ?? []).slice(0, 10).map((s) => `<li>${escapeHtml(stripControl(s))}</li>`).join("");
-    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table><h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p></body></html>`;
+    const comps = t.members.filter((m) => m.composite).map((m) => `<li>${escapeHtml(m.memberId)}: ${m.composite!.value} — ${escapeHtml(m.composite!.formula)}; components ${escapeHtml(JSON.stringify(m.composite!.components))}</li>`).join("");
+    const notes = adjustments.filter((x) => x.team === t.teamId).map((x) => `<li>${escapeHtml(x.memberId)}: ${escapeHtml(stripControl(x.note))}</li>`).join("");
+    out[t.teamId] = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>contribcheck ${escapeHtml(t.teamId)}</title><style>body{font-family:sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}@media print{body{margin:0}}</style></head><body><p><strong>Evidence for human review. This is not a grade.</strong> Git dates are self-reported.</p><h1>contribcheck — team ${escapeHtml(t.teamId)}</h1><h2>Members</h2><table><tr><th>member</th><th>commits</th><th>churn</th><th>surviving</th><th>commit share</th><th>churn share</th><th>surviving share</th></tr>${rows}</table>${comps ? `<h2>Composite (presentation aid only)</h2><p>Weights are renormalized over available dimensions. Never read this number alone.</p><ul>${comps}</ul>` : ""}<h2>Weekly activity</h2>${weeks}<h2>Flags</h2><ul>${flags || "<li>None</li>"}</ul><h2>Unresolved identities</h2><ul>${unres || "<li>None</li>"}</ul><h2>Instructor notes</h2><ul>${notes || "<li>None</li>"}</ul><h2>Evidence</h2><ul>${evItems || "<li>None</li>"}</ul><h2>Commit subjects</h2><ul>${subjects || "<li>None</li>"}</ul><p>PR data: ${t.prCollected ? "collected" : "not collected"}.</p><p>Limitations: force-pushed history cannot be recovered; shallow clones have incomplete history and blame; squash containers without PR data are approximations; git dates are self-reported.</p></body></html>`;
   }
   return out;
 }
@@ -148,18 +172,18 @@ export function renderCsv(analysis: Analysis, opts?: { redact?: boolean }): stri
   const redact = opts?.redact ?? false;
   const r = newRedactor();
   const a = redact ? redactAnalysis(analysis, r) : analysis;
-  const header = ["team", "member_id", "name", "commits", "churn_added", "churn_deleted", "churn_total", "surviving_lines", "formatting_lines", "files_touched", "active_days", "post_deadline", "pair_commits", "commit_share", "churn_share", "surviving_share"];
+  const header = ["team", "member_id", "name", "commits", "churn_added", "churn_deleted", "churn_total", "surviving_lines", "formatting_lines", "files_touched", "active_days", "post_deadline", "pair_commits", "commit_share", "churn_share", "surviving_share", "composite_value"];
   const lines = [header.join(",")];
   for (const t of a.teams) {
     for (const m of t.members) {
-      const row = [t.teamId, m.memberId, m.name, m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? ""];
+      const row = [t.teamId, m.memberId, m.name, m.commits, m.churnAdded, m.churnDeleted, m.churnTotal, m.survivingLines, m.formattingLines, m.filesTouched, m.activeDays, m.postDeadlineCommits, m.pairCommits, m.shares.commits ?? "", m.shares.churn ?? "", m.shares.survivingLines ?? "", m.composite?.value ?? ""];
       lines.push(row.map((v) => csvCell(String(v))).join(","));
     }
   }
   return lines.join("\n") + "\n";
 }
 
-export function renderExplain(analysis: Analysis, memberId: string, view: "instructor" | "student", teamId?: string, format: "md" | "json" = "md"): string {
+export function renderExplain(analysis: Analysis, memberId: string, view: "instructor" | "student", teamId?: string, format: "md" | "json" = "md", opts?: { configDir?: string }): string {
   const teams = analysis.teams.filter((t) => !teamId || t.teamId === teamId);
   const team = teams.find((t) => t.members.some((m) => m.memberId === memberId)) ?? teams[0];
   if (!team) throw new Error(`Member "${memberId}" not found`);
@@ -202,11 +226,19 @@ export function renderExplain(analysis: Analysis, memberId: string, view: "instr
     if (own.length === 0) L.push("None.");
     for (const f of own) L.push(`- \`${f.code}\` [${f.severity}]: ${stripControl(f.message)}`);
   }
+  if (view === "instructor" && opts?.configDir) {
+    const notes = loadAdjustments(opts.configDir).filter((x) => x.team === team.teamId && x.memberId === memberId);
+    L.push("");
+    L.push("## Instructor notes");
+    if (notes.length === 0) L.push("None.");
+    for (const n of notes) L.push(`- ${escapeMdCell(stripControl(n.note))}`);
+  }
   return L.join("\n");
 }
 
 export function writeReports(analysis: Analysis, formats: ReportFormat[], outDir: string, opts?: { redact?: boolean; configDir?: string }): string[] {
   fs.mkdirSync(outDir, { recursive: true });
+  const safeName = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^\.+/, "_") || "team";
   const written: string[] = [];
   for (const f of formats) {
     if (f === "json") {
@@ -220,14 +252,14 @@ export function writeReports(analysis: Analysis, formats: ReportFormat[], outDir
     } else if (f === "md") {
       const rec = renderMarkdown(analysis, opts);
       for (const [team, body] of Object.entries(rec)) {
-        const p = path.join(outDir, `${team}.md`);
+        const p = path.join(outDir, `${safeName(team)}.md`);
         fs.writeFileSync(p, body);
         written.push(p);
       }
     } else if (f === "html") {
       const rec = renderHtml(analysis, opts);
       for (const [team, body] of Object.entries(rec)) {
-        const p = path.join(outDir, `${team}.html`);
+        const p = path.join(outDir, `${safeName(team)}.html`);
         fs.writeFileSync(p, body);
         written.push(p);
       }

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { git, initRepo, commitFile, commitAll, writeConfig, mkTemp, branch, merge, renameFile } from "./helpers.js";
+import { git, initRepo, commitFile, commitAll, writeConfig, mkTemp, branch, merge, renameFile, cherryPick } from "./helpers.js";
 import { scan } from "../src/index.js";
+import { renderMarkdown, renderCsv } from "../src/report.js";
 
 let tmp = "";
 beforeEach(() => { tmp = mkTemp("cc-scan-"); });
@@ -173,6 +174,25 @@ describe("blame", () => {
 });
 
 describe("duplicate patches", () => {
+  it("counts a same-author cherry-pick once", async () => {
+    const repo = initRepo(path.join(tmp, "repo"));
+    commitFile(repo, "f.txt", "v1\n", { name: "Alice", email: "alice@example.com", date: D1, message: "init" });
+    branch(repo, "feature");
+    commitFile(repo, "g.txt", "feat\n", { name: "Alice", email: "alice@example.com", date: D2, message: "feature" });
+    const feat = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["checkout", "main"]);
+    cherryPick(repo, feat);
+    const { configPath, rosterPath, outDir } = writeConfig(tmp, [repo]);
+    const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true, includeUnmerged: true });
+    const t = analysis.teams[0]!;
+    const alice = t.members.find((m) => m.memberId === "alice")!;
+    // initial + feature original; the cherry-picked copy is excluded as a duplicate
+    expect(alice.commits).toBeCloseTo(2, 6);
+    expect(t.excluded.commits).toBe(1);
+    expect(t.flags.some((f) => f.code === "DUPLICATE_PATCH")).toBe(false);
+    expect(t.evidence["excluded"]?.some((e) => e.includes("duplicate-of"))).toBe(true);
+  });
+
   it("same-author cherry-pick counted once; different author kept + flagged", async () => {
     const repo = initRepo(path.join(tmp, "repo"));
     commitFile(repo, "f.txt", "v1\n", { name: "Alice", email: "alice@example.com", date: D1, message: "init" });
@@ -250,6 +270,29 @@ describe("output location guard", () => {
     commitFile(repo, "a.txt", "x\n", { name: "Alice", email: "alice@example.com", date: D1, message: "init" });
     const { configPath, rosterPath } = writeConfig(tmp, [repo]);
     await expect(scan({ configPath, rosterPath, out: path.join(repo, "out"), noTimestamp: true, quiet: true })).rejects.toMatchObject({ code: 2 });
+  });
+});
+
+describe("composite and instructor notes", () => {
+  it("prints the composite formula/components and notes without changing numbers", async () => {
+    const repo = initRepo(path.join(tmp, "repo"));
+    commitFile(repo, "a.txt", "x\n", { name: "Alice", email: "alice@example.com", date: D1, message: "init" });
+    commitFile(repo, "b.txt", "y\n", { name: "Bob", email: "bob@example.com", date: D2, message: "b" });
+    const extra = {
+      composite: { enabled: true, weights: { commits: 0.2, churn: 0.3, survivingLines: 0.5 } },
+      teams: { "team-alpha": { deadline: "2026-11-15T23:59:00+05:30", graceMinutes: 0, ref: "main", repos: [repo] } },
+    };
+    const { configPath, rosterPath, outDir } = writeConfig(tmp, [repo], extra);
+    fs.writeFileSync(path.join(tmp, "adjustments.yaml"), "adjustments:\n  - memberId: alice\n    team: team-alpha\n    note: Presented the demo.\n");
+    const { analysis } = await scan({ configPath, rosterPath, out: outDir, noTimestamp: true, quiet: true });
+    const md = renderMarkdown(analysis, { configDir: tmp })["team-alpha"]!;
+    expect(md).toContain("Composite (presentation aid only)");
+    expect(md).toContain("renormalized");
+    expect(md).toContain("Presented the demo.");
+    const csv = renderCsv(analysis);
+    expect(csv.split("\n")[0]).toContain("composite_value");
+    // notes never change computed metrics
+    expect(analysis.teams[0]!.members.find((m) => m.memberId === "alice")!.commits).toBe(1);
   });
 });
 

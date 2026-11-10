@@ -209,9 +209,11 @@ npm install
 npm run typecheck
 npm test
 npm run build
+npm run benchmark        # optional scale smoke benchmark (build first)
+npm run benchmark -- 500
 ```
 
-Tests create real git repositories in OS temp directories and never use the network or wall-clock time. CI runs Node 22 and 24 on Ubuntu and Windows.
+Tests create real git repositories in OS temp directories and never use the network or wall-clock time. CI runs Node 22 and 24 on Ubuntu and Windows. The benchmark is not part of `npm test`; it creates a synthetic repository and reports build/scan timings.
 
 ## License
 

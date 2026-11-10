@@ -35,9 +35,9 @@ const configSchema = z.object({
     largeCommitLines: z.number().default(2000),
     largeCommitFiles: z.number().default(50),
   }).default({ lowShare: 0.5, largeCommitLines: 2000, largeCommitFiles: 50 }),
-  areas: z.record(z.string()).default({}),
+  areas: z.record(z.string(), z.string()).default({}),
   github: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
-  teams: z.record(teamSchema),
+  teams: z.record(z.string(), teamSchema),
 });
 
 export function formatZodError(e: z.ZodError): string {

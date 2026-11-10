@@ -153,62 +153,122 @@ async function patchIdFor(repoPath: string, sha: string, cache: Map<string, stri
 
 interface NumstatRow { path: string; newPath?: string; added: number; deleted: number; binary: boolean }
 
+function parseNumstatLine(line: string): NumstatRow | null {
+  if (!line.trim()) return null;
+  const m = line.match(/^(\S+)\t(\S+)\t(.+)$/);
+  if (!m) return null;
+  const [, a, d, p] = m;
+  if (a === "-" || d === "-") return { path: p, added: 0, deleted: 0, binary: true };
+  let fp = p;
+  const braceStart = p.indexOf("{");
+  const braceEnd = p.indexOf("}", braceStart + 1);
+  if (p.includes(" => ") && braceStart >= 0 && braceEnd > braceStart) {
+    const before = p.slice(0, braceStart);
+    const inside = p.slice(braceStart + 1, braceEnd);
+    const after = p.slice(braceEnd + 1);
+    fp = before + inside.split(" => ").pop()! + after;
+  } else if (p.includes(" => ")) {
+    fp = p.split(" => ").pop()!;
+  }
+  return { path: fp.trim(), added: Number(a) || 0, deleted: Number(d) || 0, binary: false };
+}
+
 async function numstatFor(repoPath: string, sha: string, extraArgs: string[]): Promise<NumstatRow[]> {
   try {
     const { stdout } = await gitExec(repoPath, ["diff-tree", "--no-commit-id", "--numstat", "-M", "-r", "--no-ext-diff", "--no-textconv", "--root", ...extraArgs, sha]);
-    const rows: NumstatRow[] = [];
-    for (const line of stdout.split("\n")) {
-      if (!line.trim()) continue;
-      // format: added\tdeleted\tpath  (or old => new for renames with numstat? shows path with => ?)
-      const m = line.match(/^(\S+)\t(\S+)\t(.+)$/);
-      if (!m) continue;
-      const [, a, d, p] = m;
-      if (a === "-" || d === "-") {
-        rows.push({ path: p, added: 0, deleted: 0, binary: true });
-      } else {
-        // handle rename "old => new"
-        let fp = p;
-        const braceStart = p.indexOf("{");
-        const braceEnd = p.indexOf("}", braceStart + 1);
-        if (p.includes(" => ") && braceStart >= 0 && braceEnd > braceStart) {
-          const before = p.slice(0, braceStart);
-          const inside = p.slice(braceStart + 1, braceEnd);
-          const after = p.slice(braceEnd + 1);
-          fp = before + inside.split(" => ").pop()! + after;
-        } else if (p.includes(" => ")) {
-          fp = p.split(" => ").pop()!;
-        }
-        rows.push({ path: fp.trim(), added: Number(a) || 0, deleted: Number(d) || 0, binary: false });
-      }
-    }
-    return rows;
+    return stdout.split("\n").map(parseNumstatLine).filter((r): r is NumstatRow => r !== null);
   } catch {
     return [];
+  }
+}
+
+const SHA_LINE = /^[0-9a-f]{40,64}$/;
+
+/** One git process for every commit in a repository, falling back to per-commit
+ *  calls if the combined output is too large for the buffer. */
+async function numstatBatch(repoPath: string, shas: string[], extraArgs: string[]): Promise<Map<string, NumstatRow[]>> {
+  const out = new Map<string, NumstatRow[]>();
+  if (shas.length === 0) return out;
+  try {
+    const input = shas.join("\n") + "\n";
+    const { stdout } = await gitExec(repoPath, ["diff-tree", "--stdin", "--numstat", "-M", "--root", "--no-ext-diff", "--no-textconv", ...extraArgs], input);
+    let current: string | null = null;
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (SHA_LINE.test(trimmed)) {
+        current = trimmed;
+        if (!out.has(current)) out.set(current, []);
+        continue;
+      }
+      if (!current) continue;
+      const row = parseNumstatLine(line);
+      if (row) out.get(current)!.push(row);
+    }
+    return out;
+  } catch {
+    for (const sha of shas) out.set(sha, await numstatFor(repoPath, sha, extraArgs));
+    return out;
+  }
+}
+
+/** One patch-id process per repository. Empty/no-diff commits get "". */
+async function patchIdsBatch(repoPath: string, shas: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (shas.length === 0) return out;
+  try {
+    const input = shas.join("\n") + "\n";
+    const { stdout } = await gitExec(repoPath, ["diff-tree", "--stdin", "-p", "--root", "--no-ext-diff", "--no-textconv"], input);
+    const segments = new Map<string, string[]>();
+    let current: string | null = null;
+    let buf: string[] = [];
+    for (const line of stdout.split("\n")) {
+      if (SHA_LINE.test(line.trim())) {
+        if (current) segments.set(current, buf);
+        current = line.trim();
+        buf = [];
+      } else if (current) {
+        buf.push(line);
+      }
+    }
+    if (current) segments.set(current, buf);
+    if (segments.size === 0) return out;
+    let pidInput = "";
+    for (const [sha, lines] of segments) {
+      pidInput += `commit ${sha}\n` + lines.join("\n") + "\n";
+    }
+    const pid = await gitExec(repoPath, ["patch-id", "--stable"], pidInput);
+    for (const line of pid.stdout.split("\n")) {
+      const m = line.match(/^(\S+) ([0-9a-f]{40,64})$/);
+      if (m) out.set(m[2]!, m[1]!);
+    }
+    return out;
+  } catch {
+    const cache = new Map<string, string>();
+    for (const sha of shas) out.set(sha, await patchIdFor(repoPath, sha, cache));
+    return out;
   }
 }
 
 async function checkAttrBatch(repoPath: string, ref: string, files: string[]): Promise<Map<string, boolean>> {
   const result = new Map<string, boolean>();
   if (files.length === 0) return result;
-  // git check-attr linguist-generated linguist-vendored <ref> -- files... ; use stdin to avoid arg limits
-  try {
-    const input = files.map((f) => `${ref}:${f}`).join("\x00");
-    void input;
-    // Simpler: pass paths directly in chunks
-    // `git check-attr` reads the working tree's attributes; `--source` is not
-    // available on the oldest supported git (2.23), so we do not pass the ref.
-    void ref;
-    const chunk = files.slice(0, 500);
-    const { stdout } = await gitExec(repoPath, ["check-attr", "linguist-generated", "linguist-vendored", "--", ...chunk]);
-    for (const line of stdout.split("\n")) {
-      const m = line.match(/^(.+):\s+(\S+):\s+(\S+)\s*$/);
-      if (!m) continue;
-      const [, fp, attr, val] = m;
-      if ((attr === "linguist-generated" || attr === "linguist-vendored") && (val === "set" || val === "true")) {
-        result.set(fp.trim(), true);
+  // `git check-attr` reads the working tree's attributes; `--source` is not
+  // available on the oldest supported git (2.23), so we do not pass the ref.
+  void ref;
+  for (let start = 0; start < files.length; start += 500) {
+    const chunk = files.slice(start, start + 500);
+    try {
+      const { stdout } = await gitExec(repoPath, ["check-attr", "linguist-generated", "linguist-vendored", "--", ...chunk]);
+      for (const line of stdout.split("\n")) {
+        const m = line.match(/^(.+):\s+(\S+):\s+(\S+)\s*$/);
+        if (!m) continue;
+        const [, fp, attr, val] = m;
+        if ((attr === "linguist-generated" || attr === "linguist-vendored") && (val === "set" || val === "true")) {
+          result.set(fp.trim(), true);
+        }
       }
-    }
-  } catch { /* ignore */ }
+    } catch { /* ignore this chunk */ }
+  }
   return result;
 }
 
@@ -533,10 +593,36 @@ async function scanTeam(
   const attributed: AttributedCommit[] = [];
   const sortedRaw = [...allBySha.values()].sort((a, b) => (a.raw.authorDate < b.raw.authorDate ? -1 : 1));
 
-  // patch ids
+  // Batch git work: one patch-id pass and two numstat passes per repository,
+  // instead of several process spawns per commit.
+  const shasByRepo = new Map<string, string[]>();
   for (const e of sortedRaw) {
-    await patchIdFor(e.repoPath, e.raw.sha, patchCache);
+    const list = shasByRepo.get(e.repoPath) ?? [];
+    list.push(e.raw.sha);
+    shasByRepo.set(e.repoPath, list);
   }
+  const numstatNormal = new Map<string, NumstatRow[]>();
+  const numstatWhitespace = new Map<string, NumstatRow[]>();
+  for (const [repoPath, shas] of shasByRepo) {
+    const pids = await patchIdsBatch(repoPath, shas);
+    for (const [sha, pid] of pids) patchCache.set(sha, pid);
+    const normal = await numstatBatch(repoPath, shas, []);
+    const whitespace = await numstatBatch(repoPath, shas, ["-w", "--ignore-blank-lines"]);
+    for (const [sha, rows] of normal) numstatNormal.set(sha, rows);
+    for (const [sha, rows] of whitespace) numstatWhitespace.set(sha, rows);
+  }
+
+  // Attribute checks are path-based; one lookup per repository is enough.
+  const attrMaps = new Map<string, Map<string, boolean>>();
+  for (const r of repos) {
+    if (!r.headSha) {
+      attrMaps.set(r.path, new Map());
+      continue;
+    }
+    const allFiles = await listFilesAtRef(r.path, r.ref);
+    attrMaps.set(r.path, await checkAttrBatch(r.path, r.ref, allFiles));
+  }
+
   // duplicate detection
   const patchFirst = new Map<string, string>(); // patchId -> first sha (same author grouping handled below)
   const patchAuthorFirst = new Map<string, string>(); // patchId|authorKey -> first sha
@@ -575,12 +661,11 @@ async function scanTeam(
     const login = apiLoginBySha.get(raw.sha.toLowerCase()) ?? null;
 
     // churn computation
-    const rows = isMerge ? [] : await numstatFor(repoPath, raw.sha, []);
-    const rowsW = isMerge ? [] : await numstatFor(repoPath, raw.sha, ["-w", "--ignore-blank-lines"]);
+    const rows = isMerge ? [] : (numstatNormal.get(raw.sha) ?? []);
+    const rowsW = isMerge ? [] : (numstatWhitespace.get(raw.sha) ?? []);
     const wMap = new Map(rowsW.map((r) => [r.path, r]));
-    // linguist attrs for files
-    const filePaths = rows.map((r) => r.path);
-    const attrMap = await checkAttrBatch(repoPath, raw.sha, filePaths.slice(0, 200));
+    // linguist attrs are cached per repository
+    const attrMap = attrMaps.get(repoPath) ?? new Map<string, boolean>();
 
     let added = 0;
     let deleted = 0;
@@ -594,7 +679,7 @@ async function scanTeam(
       if (r.binary) continue;
       if (isBuiltInExcluded(posix)) continue;
       if (matchesAny(posix, config.excludePaths)) continue;
-      if (attrMap.get(r.path) || attrMap.get(`${raw.sha}:${r.path}`)) continue;
+      if (attrMap.get(r.path) || attrMap.get(posix)) continue;
       const w = wMap.get(r.path);
       const wAdd = w && !w.binary ? w.added : 0;
       const wDel = w && !w.binary ? w.deleted : 0;
@@ -909,6 +994,9 @@ async function scanTeam(
   unattributed.churnTotal = unattributed.churnAdded + unattributed.churnDeleted;
   excluded.churnTotal = 0;
 
+  // Index commits by SHA once; blame can involve millions of line lookups.
+  const attributedBySha = new Map(attributed.map((c) => [c.sha, c]));
+
   // Blame
   const blameCacheDir = path.join(await cacheDirFor(config), "blame");
   const survivingByMember = new Map<string, number>();
@@ -926,14 +1014,14 @@ async function scanTeam(
         if ((r.submodules ?? []).includes(f)) return false;
         return true;
       });
-      // linguist check in bulk per repo
-      const attr = await checkAttrBatch(r.path, r.ref, candidates.slice(0, 1000));
+      // linguist attributes were cached while building churn
+      const attr = attrMaps.get(r.path) ?? new Map<string, boolean>();
       for (const f of candidates) {
         if (attr.get(f)) continue;
         const lines = await blameFile(r.path, r.ref, f, blameCacheDir);
         for (const ln of lines) {
           // find commit
-          const commit = attributed.find((c) => c.sha === ln.commit);
+          const commit = attributedBySha.get(ln.commit);
           if (!commit) {
             // commit not in walked set (e.g., unmerged or outside ref) -> attribute via roster lookup if possible
             const rr = resolveIdentity(ln.authorName, ln.authorEmail, teamRoster, null);

@@ -1169,6 +1169,34 @@ Steps: `npm ci` → typecheck → test → build → `npm pack --dry-run`.
 
 Locally, everything has been run on Windows. The Linux jobs are configured but were not executed in this environment.
 
+### 12.7 Scale benchmark (not a unit test)
+
+The repository includes `scripts/benchmark-scan.mjs`:
+
+```bash
+npm run build
+npm run benchmark -- 200
+npm run benchmark -- 500
+```
+
+It creates a synthetic repository with 20 files and N commits, then times a full scan and a `--skip-blame` scan.
+
+Measured on Windows (Node 23.5, Git 2.47, warm machine):
+
+| Commits | Full scan | Skip-blame scan |
+|---|---|---|
+| 200 | ~5.5 s | ~2.1 s |
+| 500 | ~7.4 s | ~3.1 s |
+
+Before batching git calls, the same 200-commit case took ~84 s. The fix was to:
+
+- compute patch-ids for a whole repository in two git processes instead of two per commit;
+- compute normal and whitespace-insensitive numstat in two processes per repository;
+- check `linguist-*` attributes once per repository;
+- index commits by SHA for blame lookups instead of scanning an array per line.
+
+This is a **benchmark**, not a pass/fail scalability gate. It does not cover 10k+ commits, giant binary diffs, thousands of files, or multi-gigabyte repositories. Treat the numbers as a characterization, not a guarantee.
+
 ---
 
 ## 13. Publishing this package, step by step

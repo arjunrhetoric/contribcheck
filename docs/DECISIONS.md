@@ -6,7 +6,8 @@ This file records the choices made where the build prompt left room for interpre
 
 - **TypeScript, strict, ESM, `tsc` only.** `module`/`moduleResolution` are `NodeNext`; the published entry points are `dist/index.js` and `dist/index.d.ts`.
 - **Runtime dependencies are exactly the allowed four**: `commander`, `zod`, `yaml`, `csv-parse`. No dependency was added for globbing, date math, ANSI stripping, or YAML generation; small helpers live in `src/util.ts`.
-- **Dev dependencies are exactly** `typescript`, `vitest`, `@types/node`.
+- **Patched majors**: `zod` 4.6.x and `csv-parse` 7.0.x are used so the security advisories affecting the older majors are not present. `npm audit` is clean for production and development dependencies at release time.
+- **Dev dependencies are exactly** `typescript`, `vitest`, `@types/node`. Vitest 5 requires Node 22.12+ for contributors; the published runtime still supports Node 22+.
 - **Node 22+**: the code uses `fetch`, `node:readline/promises`, and built-in `Intl` timezone support.
 - **Git is always invoked through `execFile` with an argument array** (or `spawn` for stdin, used only by `git patch-id`). `shell: true` is never used.
 - **Git version check**: `git --version` is parsed at startup of `scan` and `doctor`; versions below 2.23 fail with a clear message.
@@ -45,6 +46,7 @@ This file records the choices made where the build prompt left room for interpre
 - **Blame cache key** is a hash of the repository path, blob SHA, and hash of `.git-blame-ignore-revs`. Including the repository path prevents collisions between different repos that contain the same blob (this was found by the demo).
 - **Cache placement**: `.contribcheck/` lives next to the config, except when the config directory is inside an analyzed repository. In that case the cache is moved to the OS temp directory, so the scan never creates files inside an analyzed working tree.
 - **`--skip-blame`** skips blame entirely; surviving lines become 0/omitted from computation rather than guessed.
+- **Scale strategy**: patch-ids, normal numstat, and whitespace-insensitive numstat are computed in batched git processes per repository, with per-commit fallback if a batch output exceeds the buffer. `linguist-*` attributes are cached per repository. Blame lookups use a SHA map. A 200-commit synthetic repository scans in ~5.5 s on Windows (down from ~84 s before batching); this is a benchmark, not a scalability guarantee.
 
 ## Time, weeks, deadlines
 

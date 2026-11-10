@@ -32,4 +32,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - Indexed commits by SHA for blame line attribution.
 - Benchmark: a synthetic 200-commit repository scans in ~5.5 s (down from ~84 s); 500 commits in ~7.4 s on Windows.
 
-[0.1.0]: https://github.com/example/contribcheck/releases/tag/v0.1.0
+[0.1.0]: https://github.com/arjunrhetoric/contribcheck/releases/tag/v0.1.0

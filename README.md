@@ -26,7 +26,7 @@ Git history records who did what, but common tools mislead: squash merges collap
 Requires Node.js 22+ and Git 2.23+.
 
 ```bash
-git clone <this repo> contribcheck
+git clone https://github.com/arjunrhetoric/contribcheck.git contribcheck
 cd contribcheck
 npm install
 npm run build

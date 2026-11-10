@@ -196,6 +196,7 @@ Squash merges are approximations, rewritten history is unrecoverable, shallow cl
 ## Documentation
 
 - [`docs/METHOD.md`](docs/METHOD.md) — every rule, formula, default, and a worked example
+- [`docs/EXPLAINER.md`](docs/EXPLAINER.md) — beginner-friendly guide to npm, git, the architecture, machines, publishing, and the whole package
 - [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md)
 - [`docs/ANALYSIS-SCHEMA.md`](docs/ANALYSIS-SCHEMA.md)
 - [`docs/RESPONSIBLE-USE.md`](docs/RESPONSIBLE-USE.md)
